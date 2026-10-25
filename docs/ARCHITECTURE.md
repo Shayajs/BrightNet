@@ -4,8 +4,10 @@
 
 ```text
 apps/core     serveur HTTP, authentification, réconciliation, projection
-apps/agent    BrightNet Node : collecteurs hôte et Docker, envoi BNCP vers le Core
-apps/web      interface Vue 3 et Cytoscape, servie par le Core sur le port 1717 quand elle est construite
+apps/agent    BrightNet Node, et l'application Windows BNNP
+apps/bnca     BrightNet Core Admin, application Windows
+apps/android  BrightNet pour Android, client du Core empaqueté en APK
+apps/web      interface Vue 3, carte du réseau et administration du Core, servie sur le port 1717
 internal      contrat partagé entre Core et agent
 api           description OpenAPI du contrat HTTP
 deploy        Docker Compose de développement
@@ -31,7 +33,7 @@ flowchart LR
 
 BNCP version 1 : 4 octets `BNCP`, un octet de version, un octet de type, deux octets de drapeaux, quatre octets de longueur, puis le corps. Les drapeaux doivent être nuls. Le corps dépasse 2 Mio est refusé. Les types vont de l'appairage aux événements. Le jeton d'agent voyage dans le corps des messages après l'appairage, jamais dans une commande. Ce canal n'est pas repris par le navigateur.
 
-Sans `BRIGHTNET_BNCP_ADDR`, le Node cherche les Core annoncés en mDNS `_brightnet._tcp`. Une écoute sur `127.0.0.1` n'est pas annoncée. La page d'accueil sert les exécutables Windows et Linux du Node, et l'entrée web.
+Sans `BRIGHTNET_BNCP_ADDR`, le Node cherche les Core annoncés en mDNS `_brightnet._tcp`. Une écoute sur `127.0.0.1` n'est pas annoncée. La page d'accueil sert les exécutables Windows et Linux du Node, l'APK Android, et l'entrée web.
 
 L'interface et l'API JSON sont aussi disponibles sur `1717`. Le port `8787` conserve l'API seule, le temps que les clients existants basculent.
 

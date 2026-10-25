@@ -19,10 +19,12 @@ import (
 const sessionCookie = "brightnet_session"
 
 type Server struct {
-	Store     *store.Store
-	Bus       *bus.Bus
-	Downloads string
-	limit     limiter
+	Store      *store.Store
+	Bus        *bus.Bus
+	Downloads  string
+	UIListen   string
+	BNCPListen string
+	limit      limiter
 }
 
 func New(st *store.Store, b *bus.Bus) *Server {
@@ -40,6 +42,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/logout", s.logout)
 	mux.HandleFunc("GET /api/v1/me", s.me)
 	mux.HandleFunc("GET /api/v1/summary", s.summary)
+	mux.HandleFunc("GET /api/v1/admin", s.admin)
+	mux.HandleFunc("DELETE /api/v1/agents/{id}", s.forgetAgent)
 	mux.HandleFunc("GET /api/v1/graph", s.graph)
 	mux.HandleFunc("GET /api/v1/entities/{id}", s.entity)
 	mux.HandleFunc("PATCH /api/v1/entities/{id}", s.rename)
@@ -138,6 +142,33 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, summary)
+}
+
+func (s *Server) admin(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.user(w, r); !ok {
+		return
+	}
+	summary, err := s.Store.Summary(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "administration indisponible")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ui": s.UIListen, "bncp": s.BNCPListen,
+		"entities": summary.EntityCount, "data_origin": summary.DataOrigin, "agents": summary.Agents,
+	})
+}
+
+func (s *Server) forgetAgent(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.user(w, r); !ok {
+		return
+	}
+	if err := s.Store.ForgetAgent(r.Context(), r.PathValue("id")); err != nil {
+		writeError(w, http.StatusNotFound, "node introuvable")
+		return
+	}
+	s.Bus.Publish(map[string]string{"type": "graph.changed"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
@@ -337,10 +368,6 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	var body contract.EnrollRequest
 	if !decode(w, r, &body) {
-		return
-	}
-	if strings.TrimSpace(body.PairingCode) == "" {
-		writeError(w, http.StatusBadRequest, "code d'appairage requis")
 		return
 	}
 	agentID, token, err := s.Store.Enroll(r.Context(), body)

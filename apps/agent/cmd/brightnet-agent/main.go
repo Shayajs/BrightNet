@@ -1,63 +1,77 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
-	"strings"
+	"runtime"
 	"syscall"
 
-	"brightnet/apps/agent/internal/runtime"
+	"brightnet/apps/agent/internal/panel"
 	"brightnet/internal/discover"
 )
 
 func main() {
-	coreURL := os.Getenv("BRIGHTNET_CORE_URL")
-	bncpAddr := os.Getenv("BRIGHTNET_BNCP_ADDR")
-	interactive := terminal(os.Stdin)
-	if coreURL == "" && bncpAddr == "" {
-		addr, err := findCore(interactive)
+	statePath := env("BRIGHTNET_STATE", "./data/agent-state.json")
+	file := panel.ConfigFile(statePath)
+	settings := panel.Settings{
+		BNCPAddr: env("BRIGHTNET_BNCP_ADDR", ""), CoreURL: env("BRIGHTNET_CORE_URL", ""),
+		PairingCode: os.Getenv("BRIGHTNET_PAIRING_CODE"), StatePath: statePath,
+		DockerSocket:  env("BRIGHTNET_DOCKER_SOCKET", "/var/run/docker.sock"),
+		MachineIDPath: env("BRIGHTNET_MACHINE_ID_PATH", "/etc/machine-id"),
+		HostnamePath:  os.Getenv("BRIGHTNET_HOSTNAME_PATH"), DHCPScopes: os.Getenv("BRIGHTNET_DHCP_SCOPES"),
+	}
+	if saved, err := panel.Load(file); err == nil {
+		settings = saved
+	}
+	gui := wantGUI()
+	if settings.BNCPAddr == "" && settings.CoreURL == "" && !gui {
+		addr, err := findCore(terminal(os.Stdin))
 		if err != nil {
 			slog.Error("aucun Core", "err", err)
 			os.Exit(1)
 		}
-		bncpAddr = addr
+		settings.BNCPAddr = addr
 	}
-	cfg := runtime.Config{
-		CoreURL:       coreURL,
-		BNCPAddr:      bncpAddr,
-		PairingCode:   os.Getenv("BRIGHTNET_PAIRING_CODE"),
-		StatePath:     env("BRIGHTNET_STATE", "./data/agent-state.json"),
-		DockerSocket:  env("BRIGHTNET_DOCKER_SOCKET", "/var/run/docker.sock"),
-		MachineIDPath: env("BRIGHTNET_MACHINE_ID_PATH", "/etc/machine-id"),
-		HostnamePath:  os.Getenv("BRIGHTNET_HOSTNAME_PATH"),
-		InContainer:   os.Getenv("BRIGHTNET_IN_CONTAINER") == "1",
-		DHCPScopes:    os.Getenv("BRIGHTNET_DHCP_SCOPES"),
-	}
-	if cfg.PairingCode == "" && !enrolled(cfg.StatePath) {
-		if !interactive {
-			slog.Error("code d'appairage manquant")
-			os.Exit(1)
-		}
-		fmt.Fprint(os.Stderr, "Code d'appairage : ")
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil || strings.TrimSpace(line) == "" {
-			slog.Error("code d'appairage manquant")
-			os.Exit(1)
-		}
-		cfg.PairingCode = strings.TrimSpace(line)
-	}
+	ctrl := panel.New(settings, os.Getenv("BRIGHTNET_IN_CONTAINER") == "1", file)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	slog.Info("BrightNet Node démarré", "bncp", cfg.BNCPAddr, "http", cfg.CoreURL)
-	if err := runtime.Run(ctx, cfg); err != nil && ctx.Err() == nil {
+	if gui {
+		url, err := panel.Serve(ctx, ctrl)
+		if err != nil {
+			slog.Error("fenêtre Node indisponible", "err", err)
+		} else {
+			fmt.Println("Node Parameter  " + url)
+			openBrowser(url)
+		}
+	}
+	fmt.Println("BrightNet Node. Le courant passe vers les autres Node du réseau.")
+	if err := ctrl.Loop(ctx, gui); err != nil && ctx.Err() == nil {
 		slog.Error("agent arrêté", "err", err)
 		os.Exit(1)
 	}
+}
+
+func wantGUI() bool {
+	if hasFlag("--cli") || os.Getenv("BRIGHTNET_GUI") == "0" || os.Getenv("BRIGHTNET_IN_CONTAINER") == "1" {
+		return false
+	}
+	if hasFlag("--gui") || os.Getenv("BRIGHTNET_GUI") == "1" {
+		return true
+	}
+	return terminal(os.Stdin)
+}
+
+func hasFlag(flag string) bool {
+	for _, arg := range os.Args[1:] {
+		if arg == flag {
+			return true
+		}
+	}
+	return false
 }
 
 func findCore(interactive bool) (string, error) {
@@ -79,18 +93,17 @@ func findCore(interactive bool) (string, error) {
 	return "", discover.ErrNone
 }
 
-func enrolled(path string) bool {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return false
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
 	}
-	var state struct {
-		AgentID string `json:"agent_id"`
-	}
-	if json.Unmarshal(body, &state) != nil {
-		return false
-	}
-	return state.AgentID != ""
+	_ = cmd.Start()
 }
 
 func terminal(file *os.File) bool {

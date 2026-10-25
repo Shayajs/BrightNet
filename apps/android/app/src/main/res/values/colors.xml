@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#121611</color>
+    <color name="raise">#1C2319</color>
+    <color name="text">#E8EFE0</color>
+    <color name="muted">#97A48C</color>
+    <color name="accent">#D6F25C</color>
+    <color name="accent_ink">#17200A</color>
+    <color name="danger">#E08A72</color>
+    <color name="line">#313A2C</color>
+</resources>

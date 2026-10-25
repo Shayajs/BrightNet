@@ -161,6 +161,7 @@ type AgentConfig struct {
 	Collectors              []string `json:"collectors"`
 	SnapshotIntervalSeconds int      `json:"snapshot_interval_seconds"`
 	Peers                   []string `json:"peers,omitempty"`
+	PeerNames               []string `json:"peer_names,omitempty"`
 }
 
 func NodeAck(agentID, token string) AgentConfig {
@@ -223,6 +224,7 @@ type AgentInfo struct {
 	Hostname   string     `json:"hostname"`
 	Version    string     `json:"version"`
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	MachineID  string     `json:"machine_id,omitempty"`
 	Status     string     `json:"status"`
 }
 

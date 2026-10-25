@@ -89,8 +89,8 @@ func (s *Server) dispatch(ctx context.Context, sess *session, remote string, fra
 			return 0, nil, errors.New("trop de tentatives")
 		}
 		var req contract.EnrollRequest
-		if err := Unmarshal(frame.Body, &req); err != nil || req.PairingCode == "" {
-			return 0, nil, errors.New("code d'appairage requis")
+		if err := Unmarshal(frame.Body, &req); err != nil {
+			return 0, nil, errors.New("appairage refusé")
 		}
 		agentID, token, err := s.Store.Enroll(ctx, req)
 		if err != nil {
@@ -108,7 +108,9 @@ func (s *Server) dispatch(ctx context.Context, sess *session, remote string, fra
 			return 0, nil, errors.New("battement refusé")
 		}
 		ack := contract.NodeAck("", "")
-		ack.Peers = s.peerIDs(id)
+		ids := s.peerIDs(id)
+		ack.Peers = ids
+		ack.PeerNames = s.peerNames(ctx, ids)
 		return TypeHeartbeatAck, ack, nil
 	case TypeSnapshot:
 		id, err := s.auth(ctx, frame.Body)
@@ -166,6 +168,7 @@ func (s *Server) dispatch(ctx context.Context, sess *session, remote string, fra
 		if err := target.write(TypeDirect, map[string]string{"from": id, "payload": msg.Payload}); err != nil {
 			return 0, nil, errors.New("pair hors ligne")
 		}
+		s.current(ctx, id, msg.To)
 		return TypeDirectAck, map[string]bool{"ok": true}, nil
 	default:
 		return 0, nil, ErrType
@@ -225,6 +228,23 @@ func (s *Server) peer(agentID string) *session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.peers[agentID]
+}
+
+func (s *Server) peerNames(ctx context.Context, ids []string) []string {
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		names[i] = s.Store.AgentHostname(ctx, id)
+	}
+	return names
+}
+
+func (s *Server) current(ctx context.Context, fromAgent, toAgent string) {
+	from := s.Store.HostID(ctx, fromAgent)
+	to := s.Store.HostID(ctx, toAgent)
+	if from == "" || to == "" || from == to {
+		return
+	}
+	s.Bus.Publish(map[string]string{"type": "current", "from": from, "to": to})
 }
 
 func (s *Server) peerIDs(self string) []string {

@@ -16,7 +16,7 @@ BrightNet observe une infrastructure personnelle. Le MVP applique les limites su
 - Un administrateur local est créé au premier démarrage si `BRIGHTNET_ADMIN_USER` et `BRIGHTNET_ADMIN_PASSWORD` sont définis. Sinon, `POST /api/v1/setup` n'est accepté qu'une fois, tant qu'aucun utilisateur n'existe.
 - Le mot de passe est hashé avec Argon2id.
 - La session navigateur est un cookie `HttpOnly`, `SameSite=Lax`. En HTTP local, le drapeau `Secure` est absent. Il devra être activé avec TLS.
-- Un agent s'inscrit avec un code d'appairage à durée limitée. Le code et le jeton sont stockés sous forme de hash SHA-256. Le jeton en clair n'est renvoyé qu'une fois.
+- Un Node du réseau s'inscrit tout seul. Le jeton qui suit est stocké sous forme de hash SHA-256 et n'est renvoyé en clair qu'une fois. Un code fourni explicitement reste vérifié.
 - Les routes d'ingestion refusent toute requête sans jeton d'agent correspondant à l'identifiant du chemin.
 - Le code de développement `BRIGHTNET_DEV_PAIRING_CODE` est réutilisable et ne doit pas être défini sur un service exposé au-delà de la machine. Un code créé depuis l'interface expire en dix minutes et ne sert qu'une fois.
 
@@ -33,7 +33,7 @@ Le conteneur d'agent de développement est root afin de lire le socket Docker De
 
 ## Avant tout accès réseau
 
-TLS obligatoire avant d'écouter sur toutes les interfaces, cookie `Secure`, et codes d'appairage à usage unique. En développement, `1717` et `1718` restent sur `127.0.0.1` et ne sont pas annoncés. Sur le Pi, ils sont liés à `192.168.1.3` pour que les Node de la maison puissent joindre le Core ; le chiffrement de ce lien reste à faire. Le code d'appairage réutilisable ne doit pas être défini tant que `1718` est joignable depuis le réseau. Un appareil sans Node n'est pas interrogé.
+TLS obligatoire avant d'écouter sur toutes les interfaces, et cookie `Secure`. En développement, `1717` et `1718` restent sur `127.0.0.1` et ne sont pas annoncés. Sur le Pi, ils sont liés à `192.168.1.3` : un Node de la maison s'inscrit sans code. Le chiffrement de ce lien reste à faire. Un appareil sans Node n'est pas interrogé.
 
 ## Limites connues du MVP
 

@@ -189,19 +189,22 @@ func (s *Store) Enroll(ctx context.Context, req contract.EnrollRequest) (string,
 		return "", "", err
 	}
 	defer tx.Rollback()
-	var reusable int
-	var expires string
-	err = tx.QueryRow(`SELECT reusable, expires_at FROM pairing_codes WHERE code_hash=? AND (used_at IS NULL OR reusable=1)`, HashSecret(req.PairingCode)).Scan(&reusable, &expires)
-	if err != nil {
-		return "", "", errors.New("code d'appairage invalide")
-	}
-	exp, err := time.Parse(time.RFC3339Nano, expires)
-	if err != nil || time.Now().After(exp) {
-		return "", "", errors.New("code d'appairage expiré")
-	}
-	if reusable == 0 {
-		if _, err := tx.Exec(`UPDATE pairing_codes SET used_at=? WHERE code_hash=?`, now(), HashSecret(req.PairingCode)); err != nil {
-			return "", "", err
+	req.PairingCode = strings.TrimSpace(req.PairingCode)
+	if req.PairingCode != "" {
+		var reusable int
+		var expires string
+		err = tx.QueryRow(`SELECT reusable, expires_at FROM pairing_codes WHERE code_hash=? AND (used_at IS NULL OR reusable=1)`, HashSecret(req.PairingCode)).Scan(&reusable, &expires)
+		if err != nil {
+			return "", "", errors.New("code d'appairage invalide")
+		}
+		exp, err := time.Parse(time.RFC3339Nano, expires)
+		if err != nil || time.Now().After(exp) {
+			return "", "", errors.New("code d'appairage expiré")
+		}
+		if reusable == 0 {
+			if _, err := tx.Exec(`UPDATE pairing_codes SET used_at=? WHERE code_hash=?`, now(), HashSecret(req.PairingCode)); err != nil {
+				return "", "", err
+			}
 		}
 	}
 	token, err := RandomToken()

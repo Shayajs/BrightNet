@@ -195,7 +195,7 @@ func (s *Store) Summary(ctx context.Context) (contract.Summary, error) {
 	} else if simulated > 0 && real == 0 {
 		summary.DataOrigin = "fixture"
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, hostname, version, last_seen_at FROM agents ORDER BY created_at`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, hostname, version, last_seen_at, machine_id FROM agents ORDER BY created_at`)
 	if err != nil {
 		return summary, err
 	}
@@ -204,7 +204,7 @@ func (s *Store) Summary(ctx context.Context) (contract.Summary, error) {
 	for rows.Next() {
 		var info contract.AgentInfo
 		var seen sql.NullString
-		if err := rows.Scan(&info.ID, &info.Hostname, &info.Version, &seen); err != nil {
+		if err := rows.Scan(&info.ID, &info.Hostname, &info.Version, &seen, &info.MachineID); err != nil {
 			return summary, err
 		}
 		info.Status = "offline"
@@ -219,6 +219,21 @@ func (s *Store) Summary(ctx context.Context) (contract.Summary, error) {
 		summary.Agents = append(summary.Agents, info)
 	}
 	return summary, rows.Err()
+}
+
+func (s *Store) ForgetAgent(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM agents WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) agentSeen(ctx context.Context) (map[string]time.Time, error) {

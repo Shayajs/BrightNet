@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from './api'
 import GraphCanvas from './components/GraphCanvas.vue'
+import Admin from './components/Admin.vue'
 import Home from './components/Home.vue'
 import type { Download } from './api'
 import { evidenceLabel, kindLabel, originLabel, statusLabel, views } from './labels'
@@ -25,9 +26,10 @@ const draft = ref('')
 const animations = ref(localStorage.getItem('brightnet-animations') !== 'off')
 const theme = ref(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark')
 const kinds = ref<Record<string, boolean>>({})
-const pairing = ref('')
 const downloads = ref<Download[]>([])
-const canvas = ref<{ focus: (id: string) => void } | null>(null)
+const admin = ref(false)
+const phone = ref<'map' | 'side' | 'events' | 'detail'>('map')
+const canvas = ref<{ focus: (id: string) => void, pulse: (from: string, to: string) => void } | null>(null)
 let source: EventSource | null = null
 let saveTimer = 0
 
@@ -51,7 +53,12 @@ watch(graph, (value) => {
   for (const node of value.nodes) if (!(node.kind in kinds.value)) kinds.value[node.kind] = true
 }, { deep: true })
 
+watch(selectedId, (id) => {
+  if (id && window.matchMedia('(max-width: 760px)').matches) phone.value = 'detail'
+})
+
 onMounted(async () => {
+  window.brightnetBack = brightnetBack
   downloads.value = (await api.downloads().catch(() => ({ downloads: [] }))).downloads
   try {
     const status = await api.setupStatus()
@@ -69,7 +76,10 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => source?.close())
+onBeforeUnmount(() => {
+  source?.close()
+  delete window.brightnetBack
+})
 
 async function submitAuth(kind: 'login' | 'setup') {
   error.value = ''
@@ -110,8 +120,9 @@ function connect() {
   source = new EventSource('/api/v1/events/stream')
   let refreshTimer = 0
   source.onmessage = (message) => {
-    const payload = JSON.parse(message.data) as { type: string, id?: string, label?: string, event?: Activity }
+    const payload = JSON.parse(message.data) as { type: string, id?: string, label?: string, from?: string, to?: string, event?: Activity }
     if (payload.type === 'activity' && payload.event) events.value = [payload.event, ...events.value].slice(0, 80)
+    if (payload.type === 'current' && payload.from && payload.to) canvas.value?.pulse(payload.from, payload.to)
     if (payload.type === 'entity.updated' && payload.id && graph.value) {
       const node = graph.value.nodes.find((item) => item.id === payload.id)
       if (node && payload.label) node.label = payload.label
@@ -124,7 +135,7 @@ function connect() {
 }
 
 function onMove(next: Record<string, Position>) {
-  positions.value = { ...positions.value, ...next }
+  positions.value = { ...next, __layout: { x: 2, y: 0 } }
   window.clearTimeout(saveTimer)
   saveTimer = window.setTimeout(() => { void api.saveLayout(view.value, positions.value).catch(() => undefined) }, 400)
 }
@@ -138,11 +149,6 @@ async function rename() {
 async function loadFixture() {
   await api.loadFixture()
   await refresh()
-}
-
-async function createPairing() {
-  const created = await api.pairingCode()
-  pairing.value = created.pairing_code
 }
 
 async function logout() {
@@ -173,6 +179,27 @@ function clearFocus() {
   void refresh()
 }
 
+function androidBridge() {
+  return window.BrightNetAndroid
+}
+
+function brightnetBack() {
+  if (mode.value !== 'app') return false
+  if (window.matchMedia('(max-width: 760px)').matches && phone.value !== 'map') {
+    phone.value = 'map'
+    return true
+  }
+  if (admin.value) {
+    admin.value = false
+    return true
+  }
+  if (focus.value) {
+    clearFocus()
+    return true
+  }
+  return false
+}
+
 function propertyEntries(node: GraphNode) {
   return Object.entries(node.properties).filter(([, value]) => value !== null && value !== '')
 }
@@ -191,12 +218,17 @@ function clock(value?: string) {
   if (!value) return ''
   return new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value))
 }
+
+function eventLabel(kind: string) {
+  const labels: Record<string, string> = { inventory: 'Inventaire', appear: 'Apparition', status: 'État', 'docker.event': 'Docker' }
+  return labels[kind] || kind
+}
 </script>
 
 <template>
   <main v-if="mode === 'loading'" class="gate">BrightNet</main>
   <Home v-else-if="mode === 'setup' || mode === 'login'" v-model:username="username" v-model:password="password" :mode="mode" :error="error" :downloads="downloads" @submit="submitAuth(mode === 'setup' ? 'setup' : 'login')" @theme="toggleTheme" />
-  <div v-else class="shell">
+  <div v-else class="shell" :class="{ 'admin-on': admin }" :data-phone="phone">
     <header class="top">
       <div class="brand">BrightNet <span>{{ sessionUser }}</span></div>
       <p class="origin" :data-origin="graph?.data_origin || summary?.data_origin">{{ originLabel[graph?.data_origin || summary?.data_origin || 'live'] }}</p>
@@ -207,22 +239,29 @@ function clock(value?: string) {
         <span v-else>Aucun agent appairé</span>
       </p>
       <div class="top-actions">
+        <button type="button" class="ghost" :class="{ on: admin }" @click="admin = !admin">Administration</button>
         <button type="button" class="ghost" @click="animations = !animations">{{ animations ? 'Animations' : 'Animations coupées' }}</button>
         <button type="button" class="ghost" @click="toggleTheme">{{ theme === 'dark' ? 'Clair' : 'Sombre' }}</button>
+        <button v-if="androidBridge()" type="button" class="ghost" @click="androidBridge()?.changeCore()">Core</button>
         <button type="button" class="ghost" @click="logout">Quitter</button>
       </div>
     </header>
-    <aside class="side">
+    <aside v-if="!admin" class="side">
       <label class="search">Recherche <input v-model="query" placeholder="nom, type" /></label>
       <div class="views">
         <button v-for="item in views" :key="item.id" type="button" :class="{ on: view === item.id }" @click="changeView(item.id)">
           {{ item.label }}<small v-if="!item.fed">vide</small>
         </button>
       </div>
-      <p v-if="view === 'network'" class="hint">Le réseau d’abord. Cliquez un appareil pour ouvrir ce qu’il contient.</p>
+      <p v-if="view === 'network'" class="hint">Le réseau d’abord. Cliquez un appareil pour l’ouvrir. Un nœud déplacé écarte les autres.</p>
       <button v-if="focus" type="button" class="ghost" @click="clearFocus">Revenir au réseau</button>
       <div class="filters">
-        <label v-for="(enabled, kind) in kinds" :key="kind"><input v-model="kinds[kind]" type="checkbox" /> {{ kindLabel[kind] || kind }}</label>
+        <h2>Types</h2>
+        <label v-for="(enabled, kind) in kinds" :key="kind" class="slide">
+          <input v-model="kinds[kind]" type="checkbox" />
+          <i aria-hidden="true"></i>
+          <span>{{ kindLabel[kind] || kind }}</span>
+        </label>
       </div>
       <div class="inventory">
         <section v-for="[kind, nodes] in inventory" :key="kind">
@@ -234,15 +273,14 @@ function clock(value?: string) {
       </div>
       <div class="tools">
         <button type="button" @click="loadFixture">Charger une démonstration</button>
-        <button type="button" class="ghost" @click="createPairing">Nouveau code d’appairage</button>
-        <p v-if="pairing" class="code">{{ pairing }}</p>
       </div>
     </aside>
     <section class="stage">
-      <GraphCanvas v-if="graph" ref="canvas" :graph="graph" :positions="positions" :query="query" :kinds="kinds" :animations="animations" :selected-id="selectedId" @select="selectedId = $event" @move="onMove" />
-      <p v-if="graph?.notice" class="notice">{{ graph.notice }}</p>
+      <Admin v-if="admin" />
+      <GraphCanvas v-else-if="graph" ref="canvas" :graph="graph" :positions="positions" :query="query" :kinds="kinds" :animations="animations" :selected-id="selectedId" @select="selectedId = $event" @move="onMove" />
+      <p v-if="!admin && graph?.notice" class="notice">{{ graph.notice }}</p>
     </section>
-    <aside class="detail">
+    <aside v-if="!admin" class="detail">
       <template v-if="selected">
         <p class="eyebrow">{{ kindLabel[selected.kind] || selected.kind }}</p>
         <h2>{{ selected.label }}</h2>
@@ -269,10 +307,18 @@ function clock(value?: string) {
     <footer class="events">
       <h2>Événements</h2>
       <ol>
-        <li v-for="event in events" :key="event.id" :class="{ simulated: event.simulated }">
-          <time>{{ clock(event.observed_at) }}</time>{{ event.message }}
+        <li v-for="event in events" :key="event.id" :data-kind="event.kind" :class="{ simulated: event.simulated }">
+          <time>{{ clock(event.observed_at) }}</time>
+          <span>{{ eventLabel(event.kind) }}</span>
+          <p>{{ event.message }}</p>
         </li>
       </ol>
     </footer>
+    <nav v-if="!admin" class="phone-nav" aria-label="Sections">
+      <button type="button" :class="{ on: phone === 'map' }" @click="phone = 'map'">Carte</button>
+      <button type="button" :class="{ on: phone === 'side' }" @click="phone = 'side'">Réseau</button>
+      <button type="button" :class="{ on: phone === 'events' }" @click="phone = 'events'">Événements</button>
+      <button type="button" :class="{ on: phone === 'detail' }" @click="phone = 'detail'">Fiche</button>
+    </nav>
   </div>
 </template>

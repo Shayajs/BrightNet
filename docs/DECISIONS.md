@@ -78,7 +78,7 @@ Un appareil sans Node apparaît seulement s'il a été vraiment vu : annonce mDN
 
 ## ADR 015 — dBNCP traverse le NAT par le Core
 
-dBNCP est le mode direct de BNCP. Deux Node déjà connectés au Core peuvent s'échanger un court message : le Core le relaie. Le NAT n'a pas à être ouvert. Ce n'est pas un second réseau IP et ce n'est pas un VPN pour tout le trafic de la machine. Le lien disparaît dès qu'un des deux Node n'est plus connecté.
+dBNCP est le mode direct de BNCP. Deux Node déjà connectés au Core peuvent s'échanger un court message : le Core le relaie. Le NAT n'a pas à être ouvert. Ce n'est pas un second réseau IP et ce n'est pas un VPN pour tout le trafic de la machine. Le lien disparaît dès qu'un des deux Node n'est plus connecté. Tant que le lien est ouvert, il est dessiné comme un courant, et chaque message le fait briller.
 
 ## ADR 012 — Plusieurs Node, un hôte
 
@@ -87,3 +87,21 @@ Un terminal peut lancer plusieurs BrightNet Node. Quand ils annoncent le même `
 ## ADR 016 — Le bus du Core tient le rôle de Redis
 
 Les modifications ne restent pas dans le processus qui les a écrites. Le Core publie sur un bus en mémoire : activités, renommage, changement de graphe. Chaque page abonnée les reçoit. Si le flux se remplit, les activités anciennes cèdent la place, mais le dernier changement de graphe reste. Une reconnexion reprend les événements après le dernier identifiant reçu. Ce bus remplace un Redis séparé : même rôle, sans processus de plus sur le Pi.
+
+## ADR 017 — Le Node rejoint le Core sans code
+
+Un Node qui a trouvé le Core s'inscrit tout seul. Aucun code n'est demandé. Le jeton créé à ce moment-là reste le secret des messages suivants. Un code envoyé quand même est encore contrôlé. L'écoute du Pi reste sur `192.168.1.3`, donc seules les machines qui joignent cette adresse peuvent s'inscrire.
+
+## ADR 018 — BNCA et BNNP sont deux applications Windows
+
+BNNP, BrightNet Node Parameter, est le Node avec une fenêtre. Tout est envoyé par défaut. L'utilisateur peut retirer l'inventaire de la machine, Docker, ses événements, les voisins IP, le mDNS, la note DHCP, ou le courant dBNCP. L'absence de ce réglage laisse tout partir.
+
+BNCA, BrightNet Core Admin, ne collecte rien. Elle s'ouvre sur la machine de l'administrateur, se connecte au Core, et montre les Node. Oublier un Node ne retire pas ce qu'il a déjà décrit.
+
+À la première ouverture, BNNP demande de démarrer avec Windows en arrière-plan et d'autoriser le programme sur le réseau privé. Fermer la fenêtre laisse ensuite le Node tourner. Le rouvrir ramène la même fenêtre.
+
+BrightLink est l'onglet réservé de BNNP. BrightLinkRS, BrightLinkShare et BrightSubNet y sont nommés et n'envoient encore rien.
+
+## ADR 019 — L'application Android charge le Core
+
+L'APK n'embarque pas une seconde copie de la carte. Il retient l'adresse du Core, l'ouvre en plein écran, et garde la session. Le téléphone affiche la même interface que le navigateur, rangée en Carte, Réseau, Événements et Fiche. Le clair HTTP est accepté parce que le Core du LAN n'a pas encore de TLS. Un certificat refusé n'est pas contourné. L'APK est signé avec une clé qui reste sur la machine de construction, hors du dépôt, pour qu'une réinstallation remplace l'application.

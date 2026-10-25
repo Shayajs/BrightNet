@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -32,6 +33,28 @@ type Config struct {
 	HostnamePath  string
 	InContainer   bool
 	DHCPScopes    string
+	Events        *Events
+	Log           func(string)
+	Link          func(connected bool, core string, peers []string)
+	Trouble       func(err string)
+	Observe       func(hostname string, interfaces, devices, containers int)
+}
+
+type Events struct {
+	Host         bool `json:"host"`
+	Docker       bool `json:"docker"`
+	DockerEvents bool `json:"docker_events"`
+	Neighbors    bool `json:"neighbors"`
+	MDNS         bool `json:"mdns"`
+	DHCP         bool `json:"dhcp"`
+	Current      bool `json:"current"`
+}
+
+func (c Config) events() Events {
+	if c.Events == nil {
+		return Events{Host: true, Docker: true, DockerEvents: true, Neighbors: true, MDNS: true, DHCP: true, Current: true}
+	}
+	return *c.Events
 }
 
 type state struct {
@@ -49,6 +72,7 @@ type Agent struct {
 	state      state
 	queue      []contract.DockerEvent
 	knownPeers map[string]bool
+	peerNames  map[string]string
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -58,7 +82,7 @@ func Run(ctx context.Context, cfg Config) error {
 	agent := &Agent{cfg: cfg, client: &http.Client{Timeout: 30 * time.Second}}
 	if cfg.BNCPAddr != "" {
 		client := &bncp.Client{Addr: cfg.BNCPAddr, OnDirect: func(msg bncp.Direct) {
-			slog.Info("dBNCP", "de", msg.From, "message", msg.Payload)
+			agent.note("courant  " + agent.peerLabel(msg.From) + "  " + msg.Payload)
 		}}
 		agent.wire = bncpWire{client: client}
 	} else {
@@ -97,6 +121,7 @@ func (a *Agent) loop(ctx context.Context) {
 }
 
 func (a *Agent) heartbeats(ctx context.Context) {
+	a.beat(ctx)
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -104,25 +129,44 @@ func (a *Agent) heartbeats(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cfg, err := a.wire.Heartbeat(ctx, a.agentID(), a.token())
-			if errors.Is(err, errUnauthorized) {
-				_ = a.enroll(ctx)
-			} else if err == nil {
-				if cfg.SnapshotIntervalSeconds > 0 {
-					a.mu.Lock()
-					a.state.Interval = cfg.SnapshotIntervalSeconds
-					a.mu.Unlock()
-				}
-				a.greet(ctx, cfg.Peers)
-			}
+			a.beat(ctx)
 		}
 	}
+}
+
+func (a *Agent) beat(ctx context.Context) {
+	cfg, err := a.wire.Heartbeat(ctx, a.agentID(), a.token())
+	if errors.Is(err, errUnauthorized) {
+		_ = a.enroll(ctx)
+		return
+	}
+	if err != nil {
+		a.trouble(err.Error())
+		return
+	}
+	if cfg.SnapshotIntervalSeconds > 0 {
+		a.mu.Lock()
+		a.state.Interval = cfg.SnapshotIntervalSeconds
+		a.mu.Unlock()
+	}
+	a.notePeers(cfg.Peers, cfg.PeerNames)
+	a.link(true, a.peerLabels(cfg.Peers))
+	a.trouble("")
+	a.greet(ctx, cfg.Peers)
 }
 
 func (a *Agent) events(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+		if !a.cfg.events().DockerEvents {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+				continue
+			}
 		}
 		if _, err := os.Stat(a.cfg.DockerSocket); err != nil {
 			select {
@@ -185,18 +229,35 @@ func (a *Agent) events(ctx context.Context) {
 func (a *Agent) snapshot(ctx context.Context) {
 	a.collectMu.Lock()
 	defer a.collectMu.Unlock()
+	ev := a.cfg.events()
 	hostSnap, hostRun := host.Collect(host.Options{
 		MachineIDPath: a.cfg.MachineIDPath, HostnamePath: a.cfg.HostnamePath, InContainer: a.cfg.InContainer,
 	})
 	if hostRun.Status == "" {
 		hostRun = contract.CollectorRun{Collector: "host", Status: "error", Error: "collecteur interrompu"}
 	}
-	dockerSnap, dockerRun := docker.Collect(ctx, a.cfg.DockerSocket)
-	if dockerRun.Status == "" {
-		dockerRun = contract.CollectorRun{Collector: "docker", Status: "error", Error: "collecteur interrompu"}
+	if !ev.Host {
+		hostSnap.Interfaces = nil
+		hostSnap.Gateways = nil
+		hostSnap.Networks = nil
+		hostRun = contract.CollectorRun{Collector: "host", Status: "skipped"}
 	}
-	devices, lanRun, dhcp := lan.Collect(ctx, lan.Options{DHCPScopes: a.cfg.DHCPScopes})
-	hostSnap.DHCP = dhcp
+	var dockerSnap contract.DockerSnapshot
+	var dockerRun contract.CollectorRun
+	if ev.Docker {
+		dockerSnap, dockerRun = docker.Collect(ctx, a.cfg.DockerSocket)
+		if dockerRun.Status == "" {
+			dockerRun = contract.CollectorRun{Collector: "docker", Status: "error", Error: "collecteur interrompu"}
+		}
+	} else {
+		dockerRun = contract.CollectorRun{Collector: "docker", Status: "skipped"}
+	}
+	devices, lanRun, dhcp := lan.Collect(ctx, lan.Options{
+		DHCPScopes: a.cfg.DHCPScopes, SkipNeighbors: !ev.Neighbors, SkipMDNS: !ev.MDNS, SkipDHCP: !ev.DHCP,
+	})
+	if ev.DHCP {
+		hostSnap.DHCP = dhcp
+	}
 	body := contract.Snapshot{
 		Version: contract.Version, CollectedAt: time.Now().UTC(),
 		Host: hostSnap, Devices: devices, Docker: &dockerSnap,
@@ -210,7 +271,15 @@ func (a *Agent) snapshot(ctx context.Context) {
 	}
 	if err != nil {
 		slog.Warn("instantané non envoyé", "err", err)
+		a.trouble(err.Error())
 		return
+	}
+	if a.cfg.Observe != nil {
+		containers := 0
+		if dockerSnap.Available {
+			containers = len(dockerSnap.Containers)
+		}
+		a.cfg.Observe(hostSnap.Hostname, len(hostSnap.Interfaces), len(devices), containers)
 	}
 	if cfg.SnapshotIntervalSeconds > 0 {
 		a.mu.Lock()
@@ -223,7 +292,66 @@ func (a *Agent) snapshot(ctx context.Context) {
 	}
 }
 
+func (a *Agent) notePeers(ids, names []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.peerNames == nil {
+		a.peerNames = map[string]string{}
+	}
+	for i, id := range ids {
+		name := id
+		if i < len(names) && names[i] != "" {
+			name = names[i]
+		}
+		a.peerNames[id] = name
+	}
+}
+
+func (a *Agent) peerLabels(ids []string) []string {
+	labels := make([]string, len(ids))
+	for i, id := range ids {
+		labels[i] = a.peerLabel(id)
+	}
+	return labels
+}
+
+func (a *Agent) note(line string) {
+	fmt.Println(line)
+	if a.cfg.Log != nil {
+		a.cfg.Log(line)
+	}
+}
+
+func (a *Agent) link(connected bool, peers []string) {
+	if a.cfg.Link == nil {
+		return
+	}
+	core := a.cfg.BNCPAddr
+	if core == "" {
+		core = a.cfg.CoreURL
+	}
+	a.cfg.Link(connected, core, peers)
+}
+
+func (a *Agent) trouble(err string) {
+	if a.cfg.Trouble != nil {
+		a.cfg.Trouble(err)
+	}
+}
+
+func (a *Agent) peerLabel(id string) string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if name := a.peerNames[id]; name != "" {
+		return name
+	}
+	return id
+}
+
 func (a *Agent) greet(ctx context.Context, peers []string) {
+	if !a.cfg.events().Current {
+		return
+	}
 	a.mu.Lock()
 	if a.knownPeers == nil {
 		a.knownPeers = map[string]bool{}
@@ -236,8 +364,19 @@ func (a *Agent) greet(ctx context.Context, peers []string) {
 		}
 	}
 	a.mu.Unlock()
+	opened := map[string]bool{}
 	for _, peer := range fresh {
+		opened[peer] = true
+		a.note("courant ouvert  " + a.peerLabel(peer))
 		if err := a.wire.Direct(ctx, a.agentID(), a.token(), peer, "présent"); err != nil {
+			slog.Debug("dBNCP non ouvert", "pair", peer, "err", err)
+		}
+	}
+	for _, peer := range peers {
+		if opened[peer] {
+			continue
+		}
+		if err := a.wire.Direct(ctx, a.agentID(), a.token(), peer, "courant"); err != nil {
 			slog.Debug("dBNCP non ouvert", "pair", peer, "err", err)
 		}
 	}

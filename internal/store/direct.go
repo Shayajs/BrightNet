@@ -48,3 +48,27 @@ func (s *Store) SyncDirect(ctx context.Context, agentIDs []string) error {
 	}
 	return tx.Commit()
 }
+
+func (s *Store) HostID(ctx context.Context, agentID string) string {
+	var machine string
+	if err := s.db.QueryRowContext(ctx, `SELECT machine_id FROM agents WHERE id=?`, agentID).Scan(&machine); err != nil {
+		return ""
+	}
+	key := "host:agent:" + agentID
+	if machine != "" {
+		key = "host:machine:" + machine
+	}
+	var hostID string
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM entities WHERE kind='host' AND technical_key=? AND status!='absent'`, key).Scan(&hostID); err != nil {
+		return ""
+	}
+	return hostID
+}
+
+func (s *Store) AgentHostname(ctx context.Context, agentID string) string {
+	var name string
+	if err := s.db.QueryRowContext(ctx, `SELECT hostname FROM agents WHERE id=?`, agentID).Scan(&name); err != nil || name == "" {
+		return agentID
+	}
+	return name
+}

@@ -56,6 +56,8 @@ func main() {
 	h := bus.New()
 	apiServer := httpserver.New(st, h)
 	apiServer.Downloads = os.Getenv("BRIGHTNET_DOWNLOADS")
+	apiServer.UIListen = uiListen
+	apiServer.BNCPListen = bncpListen
 	api := apiServer.Handler()
 	stopAnnounce, err := discover.Announce(bncpListen)
 	if err != nil {

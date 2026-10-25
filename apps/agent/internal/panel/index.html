@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BrightNet Node Parameter</title>
+<link rel="stylesheet" href="/face.css" />
+<style>
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 232px; }
+  main { overflow: auto; padding: 8px 36px 40px; }
+  h1 { margin: 0 0 8px; font-size: 48px; line-height: 0.95; letter-spacing: -0.06em; font-weight: 600; }
+  h2 { margin: 28px 0 10px; font-size: 13px; font-family: "IBM Plex Mono", monospace; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  p { color: var(--muted); }
+  .eyebrow { margin: 0 0 8px; color: var(--accent); font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; }
+  .tabs { border-left: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 8px; background: color-mix(in srgb, var(--raise) 72%, transparent); }
+  .tabs button { text-align: left; background: transparent; border: 1px solid transparent; border-radius: 12px; padding: 12px 14px; color: var(--text); }
+  .tabs button.on { border-color: var(--accent); color: var(--accent); }
+  form { display: grid; gap: 14px; max-width: 560px; }
+  label { display: grid; gap: 6px; color: var(--muted); font-size: 14px; }
+  input { background: var(--sunken); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; }
+  .checks { display: grid; gap: 8px; }
+  .checks label { display: flex; gap: 10px; align-items: center; color: var(--text); padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--raise) 88%, transparent); }
+  .checks input { width: auto; accent-color: var(--accent); }
+  button.act { justify-self: start; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 999px; padding: 11px 18px; font-weight: 600; }
+  button.ghost { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 11px 18px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .ok { color: var(--ok); }
+  .bad { color: var(--danger); }
+  .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 640px; margin-top: 22px; }
+  .metrics article { padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: color-mix(in srgb, var(--raise) 90%, transparent); }
+  .metrics span { display: block; color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .metrics strong { display: block; margin-top: 8px; font-size: 36px; letter-spacing: -0.05em; font-weight: 600; }
+  .peers { display: flex; flex-wrap: wrap; gap: 8px; }
+  .peers span, .empty { border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; background: var(--sunken); }
+  .empty { color: var(--muted); }
+  pre { white-space: pre-wrap; background: var(--sunken); border: 1px solid var(--line); border-radius: 16px; padding: 14px; min-height: 160px; font-family: "IBM Plex Mono", monospace; font-size: 13px; }
+  .links { display: grid; gap: 12px; max-width: 640px; }
+  .link { border: 1px solid var(--line); border-radius: 22px; padding: 20px; background: color-mix(in srgb, var(--raise) 92%, transparent); }
+  .link h3 { margin: 6px 0; font-size: 28px; letter-spacing: -0.05em; }
+  .link p { margin: 0; }
+  .soon { margin: 0; color: var(--accent); font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
+  details { color: var(--muted); }
+  summary { cursor: pointer; }
+  .view { display: none; }
+  .view.on { display: block; }
+  .shell { position: relative; }
+  .modal { position: absolute; inset: 48px 0 0; z-index: 4; display: none; align-items: center; justify-content: center; padding: 28px; background: color-mix(in srgb, #070907 72%, transparent); }
+  .modal.on { display: flex; }
+  .modal .card { width: min(480px, 100%); padding: 26px 26px 20px; border: 1px solid var(--line); border-radius: 24px; background: var(--raise); box-shadow: 0 28px 70px rgb(0 0 0 / 45%); }
+  .modal h1 { font-size: 34px; }
+  .modal article { margin-top: 12px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--sunken) 55%, transparent); }
+  .modal h2 { margin: 0 0 6px; font-family: Outfit, sans-serif; font-size: 18px; letter-spacing: -0.03em; text-transform: none; color: var(--text); }
+  .modal article p { margin: 0; }
+  .modal .row { margin-top: 16px; }
+
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="frame">
+    <div class="brand"><i></i>BrightNet</div>
+    <p class="product">Node Parameter</p>
+    <div class="winbtns">
+      <button type="button" data-act="min" aria-label="Réduire"></button>
+      <button type="button" data-act="max" aria-label="Agrandir"></button>
+      <button type="button" data-act="close" aria-label="Fermer"></button>
+    </div>
+  </header>
+  <div id="setup" class="modal" role="presentation">
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+      <p class="eyebrow">Initialisation</p>
+      <h1 id="setup-title">Cette machine</h1>
+      <p>Deux autorisations, demandées tant qu’elles ne sont pas en place.</p>
+      <article>
+        <h2>Démarrer avec Windows</h2>
+        <p>Le Node se lance en arrière-plan à l’ouverture de session et reste relié au Core. Fermer la fenêtre le laisse tourner.</p>
+      </article>
+      <article>
+        <h2>Ouvrir les ports</h2>
+        <p>Windows autorise BrightNet Node sur le réseau privé, pour trouver le Core et parler aux autres Node. Une confirmation s’affiche.</p>
+      </article>
+      <p id="setup-error" class="bad"></p>
+      <div class="row">
+        <button class="act" id="setup-go" type="button">Autoriser</button>
+        <button class="ghost" id="setup-later" type="button">Plus tard</button>
+      </div>
+    </div>
+  </div>
+  <div class="body">
+    <main>
+      <section class="view on" id="network">
+        <p class="eyebrow">BNNP</p>
+        <h1>Mon réseau</h1>
+        <p id="net-host">Cette machine n’a pas encore envoyé d’instantané.</p>
+        <div class="metrics" id="net-counts"></div>
+        <h2>Courant vers</h2>
+        <div class="peers" id="net-peers"><span class="empty">Aucun pair pour l’instant.</span></div>
+      </section>
+      <section class="view" id="info">
+        <p class="eyebrow">BNNP</p>
+        <h1>Informations</h1>
+        <p id="link">Recherche du Core…</p>
+        <pre id="log"></pre>
+      </section>
+      <section class="view" id="settings">
+        <p class="eyebrow">BNNP</p>
+        <h1>Paramètres</h1>
+        <p>Tout part vers le Core. Décochez seulement ce que cette machine doit garder pour elle.</p>
+        <form id="form">
+          <label>Adresse BNCP <input name="bncp_addr" placeholder="192.168.1.3:1718" /></label>
+          <label>Adresse HTTP, si le BNCP n’est pas utilisé <input name="core_url" placeholder="http://192.168.1.3:1717" /></label>
+          <label>Code d’appareillage, laissé vide pour un réseau de confiance <input name="pairing_code" /></label>
+          <h2>Ce qui est envoyé</h2>
+          <div class="checks">
+            <label><input type="checkbox" name="host" checked /> Inventaire de la machine</label>
+            <label><input type="checkbox" name="docker" checked /> Docker</label>
+            <label><input type="checkbox" name="docker_events" checked /> Événements Docker</label>
+            <label><input type="checkbox" name="neighbors" checked /> Voisins IP</label>
+            <label><input type="checkbox" name="mdns" checked /> Annonces mDNS</label>
+            <label><input type="checkbox" name="dhcp" checked /> Note DHCP</label>
+            <label><input type="checkbox" name="current" checked /> Courant dBNCP</label>
+          </div>
+          <details>
+            <summary>Chemins</summary>
+            <label>État <input name="state_path" /></label>
+            <label>Socket Docker <input name="docker_socket" /></label>
+            <label>machine-id <input name="machine_id_path" /></label>
+            <label>hostname <input name="hostname_path" /></label>
+            <label>Baux DHCP <input name="dhcp_scopes" /></label>
+          </details>
+          <div class="row">
+            <button class="act" type="submit">Relier</button>
+            <button class="ghost" id="find" type="button">Chercher un Core</button>
+            <button class="ghost" id="stop" type="button">Arrêter le Node</button>
+          </div>
+          <p id="found"></p>
+        </form>
+      </section>
+      <section class="view" id="brightlink">
+        <p class="eyebrow">BNNP</p>
+        <h1>BrightLink</h1>
+        <p>L’endroit est prêt. Les trois liaisons viendront ici, plus tard. Rien de tout cela ne circule pour l’instant.</p>
+        <div class="links">
+          <article class="link"><p class="soon">Plus tard</p><h3>BrightLinkRS</h3><p>Partage de ressources en UDP, avec un checksum pour retrouver la redondance de TCP et garder la vitesse d’UDP.</p></article>
+          <article class="link"><p class="soon">Plus tard</p><h3>BrightLinkShare</h3><p>Partage d’un fichier ou d’un dossier.</p></article>
+          <article class="link"><p class="soon">Plus tard</p><h3>BrightSubNet</h3><p>Invitation d’une autre machine dans notre réseau, pour partager une information ou le réseau lui-même.</p></article>
+        </div>
+      </section>
+      <section class="view" id="about">
+        <p class="eyebrow">BNNP</p>
+        <h1>À propos</h1>
+        <p>BrightNet Node Parameter est la fenêtre du Node. Elle choisit le Core, ce qui lui est envoyé, et montre le courant ouvert vers les autres machines.</p>
+        <p>BrightNet Core Admin, BNCA, est l’autre application. Elle gère le Core, elle ne collecte pas cette machine.</p>
+      </section>
+    </main>
+    <nav class="tabs">
+      <button type="button" class="on" data-tab="network">Mon réseau</button>
+      <button type="button" data-tab="info">Informations</button>
+      <button type="button" data-tab="settings">Paramètres</button>
+      <button type="button" data-tab="brightlink">BrightLink</button>
+      <button type="button" data-tab="about">À propos</button>
+    </nav>
+  </div>
+</div>
+<script src="/frame.js"></script>
+<script>
+const fields = ["bncp_addr","core_url","pairing_code","state_path","docker_socket","machine_id_path","hostname_path","dhcp_scopes"]
+const eventNames = ["host","docker","docker_events","neighbors","mdns","dhcp","current"]
+const form = document.querySelector("#form")
+document.querySelectorAll(".tabs button").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach((item) => item.classList.toggle("on", item === button))
+    document.querySelectorAll(".view").forEach((view) => view.classList.toggle("on", view.id === button.dataset.tab))
+  })
+})
+function eventsOf(source) {
+  const events = source || {}
+  return Object.fromEntries(eventNames.map((name) => [name, source ? !!events[name] : true]))
+}
+async function load() {
+  const settings = await fetch("/api/settings").then((res) => res.json())
+  for (const name of fields) form.elements[name].value = settings[name] || ""
+  const events = eventsOf(settings.events)
+  for (const name of eventNames) form.elements[name].checked = events[name]
+}
+form.addEventListener("submit", async (event) => {
+  event.preventDefault()
+  const body = {}
+  for (const name of fields) body[name] = form.elements[name].value
+  body.events = eventsOf(null)
+  for (const name of eventNames) body.events[name] = form.elements[name].checked
+  const res = await fetch("/api/settings", {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)})
+  document.querySelector("#found").textContent = res.ok ? "Réglage repris." : "Réglage refusé."
+})
+document.querySelector("#find").addEventListener("click", async () => {
+  const found = await fetch("/api/discover").then((res) => res.json())
+  const line = document.querySelector("#found")
+  if (!found.cores || !found.cores.length) { line.textContent = "Aucun Core annoncé."; return }
+  if (found.cores.length === 1) {
+    form.elements.bncp_addr.value = found.cores[0].addr
+    form.requestSubmit()
+    return
+  }
+  line.textContent = found.cores.map((core, i) => (i + 1) + ". " + core.name + "  " + core.addr).join("   ")
+})
+async function tick() {
+  const status = await fetch("/api/status").then((res) => res.json()).catch(() => null)
+  if (!status) return
+  const link = document.querySelector("#link")
+  link.className = status.connected ? "ok" : "bad"
+  link.textContent = status.connected ? "Relié à " + status.core : (status.error || "Pas encore relié")
+  document.querySelector("#log").textContent = (status.lines || []).join("\n")
+  const host = document.querySelector("#net-host")
+  host.textContent = status.hostname ? status.hostname + " envoie ce qui est coché." : "Cette machine n’a pas encore envoyé d’instantané."
+  document.querySelector("#net-counts").innerHTML = [
+    ["Interfaces", status.interfaces], ["Appareils vus", status.devices], ["Conteneurs", status.containers]
+  ].map(([label, value]) => "<article><span>" + label + "</span><strong>" + (value || 0) + "</strong></article>").join("")
+  const peers = status.peers || []
+  document.querySelector("#net-peers").innerHTML = peers.length ? peers.map((peer) => "<span>" + peer + "</span>").join("") : "<span class=\"empty\">Aucun pair pour l’instant.</span>"
+}
+load()
+tick()
+setInterval(tick, 2000)
+const setup = document.querySelector("#setup")
+function showApp() {
+  setup.classList.remove("on")
+}
+async function bootInstall() {
+  const state = await fetch("/api/install").then((res) => res.json()).catch(() => null)
+  if (!state || state.ready) return
+  setup.classList.add("on")
+  document.querySelector("#setup-go").focus()
+}
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && setup.classList.contains("on")) showApp()
+})
+document.querySelector("#setup-later").addEventListener("click", showApp)
+document.querySelector("#setup-go").addEventListener("click", async () => {
+  const button = document.querySelector("#setup-go")
+  const error = document.querySelector("#setup-error")
+  button.disabled = true
+  button.textContent = "Confirmation Windows…"
+  error.textContent = ""
+  const state = await fetch("/api/install", {method:"POST"}).then((res) => res.json()).catch(() => null)
+  button.disabled = false
+  button.textContent = "Autoriser"
+  if (state && state.ready) { showApp(); return }
+  error.textContent = (state && state.error) || "L’initialisation n’est pas terminée."
+})
+document.querySelector("#stop").addEventListener("click", () => {
+  fetch("/api/stop", {method:"POST"})
+})
+bootInstall()
+</script>
+</body>
+</html>

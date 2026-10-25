@@ -30,6 +30,7 @@ services:
       BRIGHTNET_MACHINE_ID_PATH: /host/machine-id
       BRIGHTNET_HOSTNAME_PATH: /host/hostname
       BRIGHTNET_DHCP_SCOPES: /host/dhcp
+      BRIGHTNET_GUI: "0"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/machine-id:/host/machine-id:ro

@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import cytoscape, { type Core, type ElementDefinition, type LayoutOptions } from 'cytoscape'
-import fcose from 'cytoscape-fcose'
+import cytoscape, { type Core, type ElementDefinition, type NodeSingular } from 'cytoscape'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { lanes, pack, separate, type Marble } from '../layout'
 import type { Graph, Position } from '../types'
-
-cytoscape.use(fcose)
 
 const props = defineProps<{
   graph: Graph
@@ -22,8 +20,14 @@ const emit = defineEmits<{
 
 const host = ref<HTMLElement | null>(null)
 let cy: Core | null = null
-let laidOut = false
-let fitted = false
+let arranged = false
+let arrangedMode = ''
+let arrangedIds: string[] = []
+let dragFrame = 0
+let flowFrame = 0
+let flowing = false
+const surges = new Map<string, number>()
+const memory = new Map<string, Position>()
 const collapsed = new Set<string>()
 const previousStatus = new Map<string, string>()
 
@@ -46,9 +50,10 @@ const stylesheet = [
   { selector: 'node.absent, node.offline, node.dead', style: { opacity: 0.4, 'border-style': 'dashed' } },
   { selector: 'node.simulated', style: { 'border-style': 'dashed' } },
   { selector: 'node.just-changed', style: { 'border-width': 5, 'border-color': '#d6f25c' } },
-  { selector: ':parent', style: { 'background-color': '#d6f25c', 'background-opacity': 0.06, 'border-color': '#3c4a34', 'border-width': 1, shape: 'round-rectangle', padding: '16px', 'text-valign': 'top', 'text-margin-y': -4, color: '#c5d2b4' } },
+  { selector: ':parent', style: { 'background-color': '#d6f25c', 'background-opacity': 0.06, 'border-color': '#3c4a34', 'border-width': 1, shape: 'round-rectangle', padding: '28px', 'text-valign': 'top', 'text-margin-y': -6, color: '#c5d2b4' } },
   { selector: 'edge', style: { width: 1.2, 'line-color': '#44523c', 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#44523c', 'arrow-scale': 0.7, opacity: 0.85 } },
-  { selector: 'edge.dbncp', style: { width: 2.4, 'line-color': '#d6f25c', 'line-style': 'dashed', 'target-arrow-color': '#d6f25c', label: 'data(label)', color: '#d6f25c', 'font-size': 11, 'font-family': 'IBM Plex Mono, monospace', 'text-background-color': '#121611', 'text-background-opacity': 0.9, 'text-background-padding': '3px' } },
+  { selector: 'edge.dbncp', style: { width: 2.2, 'line-color': '#d6f25c', 'line-style': 'dashed', 'line-dash-pattern': [3, 9], 'target-arrow-shape': 'none', label: 'data(label)', color: '#d6f25c', 'font-size': 11, 'font-family': 'IBM Plex Mono, monospace', 'text-background-color': '#121611', 'text-background-opacity': 0.9, 'text-background-padding': '3px' } },
+  { selector: 'edge.dbncp.surge', style: { width: 4.5, 'line-color': '#f6ffc2', 'line-dash-pattern': [2, 7], 'target-arrow-color': '#f6ffc2', color: '#f6ffc2' } },
   { selector: '.dim', style: { opacity: 0.12 } },
 ] as unknown as cytoscape.StylesheetJson
 
@@ -102,18 +107,183 @@ function ordered(nodes: Graph['nodes'][number][], ids: Set<string>) {
   return result.concat(pending)
 }
 
-function place(node: Graph['nodes'][number], ids: Set<string>): Position {
-  const saved = props.positions[node.id]
-  if (saved) return saved
-  const parent = parentOf(node, ids)
-  const base = parent && props.positions[parent] ? props.positions[parent] : { x: 0, y: 0 }
-  const angle = (hash(node.id) % 360) * (Math.PI / 180)
-  const ring = 90 + (hash(node.id) % 40)
-  return { x: base.x + Math.cos(angle) * ring, y: base.y + Math.sin(angle) * ring }
+function savedMode() {
+  return props.positions.__layout?.x === 2
 }
 
-function hash(value: string) {
-  return [...value].reduce((sum, char) => sum + char.charCodeAt(0), 0)
+function place(node: Graph['nodes'][number]): Position {
+  return memory.get(node.id) || (savedMode() ? props.positions[node.id] : undefined) || { x: 0, y: 0 }
+}
+
+function blockOf(node: NodeSingular) {
+  const box = node.boundingBox({ includeLabels: true })
+  const w = Math.max(box.w, 28)
+  const h = Math.max(box.h, 28)
+  return { id: node.id(), kind: String(node.data('kind') || ''), label: String(node.data('label') || ''), w: w + 20, h: h + 16 }
+}
+
+function moveBy(node: NodeSingular, dx: number, dy: number) {
+  if (!dx && !dy) return
+  const leaves = node.isParent() ? node.descendants().filter((item) => !item.isParent()) : cy!.collection().union(node)
+  leaves.forEach((leaf) => {
+    const position = leaf.position()
+    leaf.position({ x: position.x + dx, y: position.y + dy })
+  })
+}
+
+function moveTo(node: NodeSingular, x: number, y: number) {
+  const box = node.boundingBox({ includeLabels: true })
+  moveBy(node, x - (box.x1 + box.w / 2), y - (box.y1 + box.h / 2))
+}
+
+function siblingGroups() {
+  const groups = new Map<string, NodeSingular[]>()
+  cy?.nodes().forEach((node) => {
+    const key = String(node.data('parent') || '')
+    const list = groups.get(key) || []
+    list.push(node)
+    groups.set(key, list)
+  })
+  return [...groups.entries()].sort((a, b) => depth(b[0]) - depth(a[0]))
+}
+
+function depth(id: string) {
+  let level = 0
+  let current = id
+  while (current && cy) {
+    const node = cy.getElementById(current)
+    if (node.empty()) break
+    current = String(node.data('parent') || '')
+    level += 1
+  }
+  return level
+}
+
+function packAll() {
+  if (!cy) return
+  for (const [, siblings] of siblingGroups()) {
+    const points = pack(lanes(siblings.map((node) => blockOf(node))))
+    siblings.forEach((node) => {
+      const point = points.get(node.id())
+      if (point) moveTo(node, point.x, point.y)
+    })
+  }
+}
+
+function restoreSaved() {
+  cy?.nodes().forEach((node) => {
+    if (node.isParent()) return
+    const point = props.positions[node.id()] || memory.get(node.id())
+    if (point) node.position(point)
+  })
+}
+
+function marbles(nodes: NodeSingular[]): Marble[] {
+  return nodes.map((node) => {
+    const box = node.boundingBox({ includeLabels: true })
+    return { id: node.id(), x: box.x1 + box.w / 2, y: box.y1 + box.h / 2, r: Math.max(box.w, box.h) / 2 + 18 }
+  })
+}
+
+function relax(nodes: NodeSingular[], fixed: Set<string>, steps: number) {
+  if (nodes.length < 2) return
+  const start = new Map(marbles(nodes).map((item) => [item.id, item]))
+  const done = separate([...start.values()], fixed, steps)
+  for (const item of done) {
+    const from = start.get(item.id)
+    const node = cy?.getElementById(item.id)
+    if (!from || !node || node.empty()) continue
+    moveBy(node, item.x - from.x, item.y - from.y)
+  }
+}
+
+function relaxAll(steps: number, fixed = new Set<string>()) {
+  for (const [, siblings] of siblingGroups()) relax(siblings, fixed, steps)
+}
+
+function remember() {
+  cy?.nodes().forEach((node) => {
+    if (node.isParent()) return
+    const position = node.position()
+    memory.set(node.id(), { x: position.x, y: position.y })
+  })
+}
+
+function overlap(next: string[]) {
+  if (!arrangedIds.length || !next.length) return 0
+  const known = new Set(arrangedIds)
+  const shared = next.filter((id) => known.has(id)).length
+  return shared / Math.max(arrangedIds.length, next.length)
+}
+
+function arrange(ids: string[]) {
+  if (!cy || ids.length === 0) return
+  const mode = savedMode() ? 'saved' : 'auto'
+  const viewChanged = !arranged || overlap(ids) < 0.5
+  const fresh = viewChanged || arrangedMode !== mode
+  if (fresh) {
+    if (mode === 'saved') restoreSaved()
+    else packAll()
+    relaxAll(mode === 'saved' ? 16 : 28)
+    if (viewChanged) cy.fit(undefined, 56)
+    arranged = true
+    arrangedMode = mode
+    arrangedIds = ids
+    remember()
+    return
+  }
+  const newcomers = cy.nodes().filter((node) => !node.isParent() && !memory.has(node.id()))
+  if (newcomers.empty()) return
+  newcomers.forEach((node, index) => {
+    node.position({ x: 80 + index * 48, y: -120 })
+  })
+  relaxAll(14)
+  remember()
+}
+
+function pulse(from: string, to: string) {
+  const edge = cy?.edges().filter((item) => {
+    if (item.data('kind') !== 'DIRECT') return false
+    const source = String(item.data('source'))
+    const target = String(item.data('target'))
+    return (source === from && target === to) || (source === to && target === from)
+  })
+  const found = edge && edge.length ? edge[0] : undefined
+  if (!found) return
+  found.addClass('surge')
+  surges.set(found.id(), performance.now() + 1400)
+}
+
+function flow() {
+  if (!flowing || !cy) return
+  flowFrame = (flowFrame + 1) % 64
+  cy.edges('.dbncp').forEach((edge) => {
+    const hot = (surges.get(edge.id()) ?? 0) > performance.now()
+    if (!props.animations) {
+      edge.removeClass('surge')
+      edge.removeStyle('line-dash-offset')
+      return
+    }
+    edge.style('line-dash-offset', hot ? -flowFrame * 2 : -flowFrame * 0.45)
+    if (hot) edge.addClass('surge')
+    else edge.removeClass('surge')
+  })
+  requestAnimationFrame(flow)
+}
+
+function pushAround(node: NodeSingular) {
+  const fixed = new Set<string>([node.id()])
+  let current: NodeSingular | undefined = node
+  while (current && !current.empty()) {
+    const parent = String(current.data('parent') || '')
+    const siblings = cy!.nodes().filter((item) => String(item.data('parent') || '') === parent)
+    relax([...siblings], fixed, 3)
+    if (!parent) break
+    fixed.add(parent)
+    const container = cy!.getElementById(parent)
+    current = container.empty() ? undefined : container
+  }
+  remember()
 }
 
 function sync() {
@@ -137,7 +307,7 @@ function sync() {
       if (parent) data.parent = parent
       const existing = cy?.getElementById(node.id)
       if (!existing || existing.empty()) {
-        cy?.add({ group: 'nodes', data, classes: classesOf(node, flash), position: place(node, ids) })
+        cy?.add({ group: 'nodes', data, classes: classesOf(node, flash), position: place(node) })
       } else {
         if (existing.data('parent') !== (parent ?? undefined)) {
           const position = existing.position()
@@ -164,16 +334,7 @@ function sync() {
       }
     }
   })
-  const hasSaved = Object.keys(props.positions).length > 0
-  if (!laidOut && !hasSaved && nodes.length > 0) {
-    cy.layout({ name: 'fcose', animate: false, fit: true, padding: 48, nodeDimensionsIncludeLabels: true } as LayoutOptions).run()
-    laidOut = true
-    emit('move', readPositions())
-  }
-  if (!fitted && nodes.length > 0) {
-    cy.fit(undefined, 48)
-    fitted = true
-  }
+  arrange(props.graph.nodes.map((node) => node.id).sort())
   highlight()
 }
 
@@ -217,25 +378,57 @@ onMounted(() => {
     container: host.value,
     elements: [],
     style: stylesheet,
-    wheelSensitivity: 0.2,
-    minZoom: 0.15,
-    maxZoom: 2.6,
+    wheelSensitivity: 1,
+    minZoom: 0.08,
+    maxZoom: 6,
     boxSelectionEnabled: true,
   })
   cy.on('tap', 'node', (event) => emit('select', event.target.id()))
   cy.on('tap', (event) => {
     if (event.target === cy) emit('select', '')
   })
+  host.value.addEventListener('wheel', zoomWheel, { capture: true, passive: false })
   cy.on('dbltap', 'node', (event) => {
     const id = event.target.id() as string
     if (collapsed.has(id)) collapsed.delete(id)
     else collapsed.add(id)
     sync()
   })
-  cy.on('dragfree', 'node', () => emit('move', readPositions()))
+  let draggedId = ''
+  cy.on('drag', 'node', (event) => {
+    draggedId = event.target.id() as string
+    if (dragFrame) return
+    dragFrame = requestAnimationFrame(() => {
+      dragFrame = 0
+      const node = cy?.getElementById(draggedId)
+      if (node && !node.empty()) pushAround(node)
+    })
+  })
+  cy.on('dragfree', 'node', () => {
+    const node = draggedId ? cy?.getElementById(draggedId) : undefined
+    if (node && !node.empty()) {
+      pushAround(node)
+      relaxAll(8, new Set([draggedId]))
+    }
+    remember()
+    emit('move', readPositions())
+  })
   sync()
+  flowing = true
+  requestAnimationFrame(flow)
   window.addEventListener('resize', resize)
 })
+
+function zoomWheel(event: WheelEvent) {
+  if (!cy || !host.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  const raw = event.deltaMode === 1 ? event.deltaY * 100 : event.deltaY
+  const notches = raw / 100
+  const rect = host.value.getBoundingClientRect()
+  const level = Math.min(cy.maxZoom(), Math.max(cy.minZoom(), cy.zoom() * Math.pow(1.35, -notches)))
+  cy.zoom({ level, renderedPosition: { x: event.clientX - rect.left, y: event.clientY - rect.top } })
+}
 
 function resize() {
   cy?.resize()
@@ -253,12 +446,14 @@ watch(() => props.selectedId, () => {
 })
 
 onBeforeUnmount(() => {
+  flowing = false
+  host.value?.removeEventListener('wheel', zoomWheel, { capture: true })
   window.removeEventListener('resize', resize)
   cy?.destroy()
   cy = null
 })
 
-defineExpose({ focus })
+defineExpose({ focus, pulse })
 </script>
 
 <template>

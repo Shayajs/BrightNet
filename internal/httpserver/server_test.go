@@ -131,6 +131,10 @@ func TestAuthAndIngest(t *testing.T) {
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("graphe sans session: %d", res.StatusCode)
 	}
+	res = post(t, srv.URL+"/api/v1/agents/enroll", nil, contract.EnrollRequest{Hostname: "poste"})
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("appairage automatique: %d", res.StatusCode)
+	}
 	res = post(t, srv.URL+"/api/v1/agents/enroll", nil, contract.EnrollRequest{PairingCode: "mauvais"})
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("mauvais code: %d", res.StatusCode)

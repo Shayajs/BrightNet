@@ -43,6 +43,8 @@ export const api = {
   loadFixture: () => request('/api/v1/fixtures/load', { method: 'POST' }),
   pairingCode: () => request<{ pairing_code: string; expires_at: string }>('/api/v1/pairing-codes', { method: 'POST' }),
   downloads: () => request<{ downloads: Download[] }>('/api/v1/downloads'),
+  admin: () => request<AdminView>('/api/v1/admin'),
+  forgetAgent: (id: string) => request(`/api/v1/agents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
 
 export type Download = {
@@ -53,4 +55,12 @@ export type Download = {
   file: string
   note: string
   available: boolean
+}
+
+export type AdminView = {
+  ui: string
+  bncp: string
+  entities: number
+  data_origin: 'live' | 'mixed' | 'fixture'
+  agents: { id: string, hostname: string, version: string, status: string, last_seen_at?: string, machine_id?: string }[]
 }

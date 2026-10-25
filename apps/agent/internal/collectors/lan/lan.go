@@ -20,9 +20,12 @@ var deviceServices = []string{
 }
 
 type Options struct {
-	ARPPath    string
-	RoutePath  string
-	DHCPScopes string
+	ARPPath       string
+	RoutePath     string
+	DHCPScopes    string
+	SkipNeighbors bool
+	SkipMDNS      bool
+	SkipDHCP      bool
 }
 
 func Collect(ctx context.Context, opt Options) ([]contract.DeviceSnapshot, contract.CollectorRun, string) {
@@ -34,16 +37,28 @@ func Collect(ctx context.Context, opt Options) ([]contract.DeviceSnapshot, contr
 	for _, ip := range host.DefaultGateways() {
 		gateways[ip] = true
 	}
-	devices := neighbors(opt.ARPPath, own, gateways)
-	for _, found := range browse(ctx) {
-		ip, _, _ := net.SplitHostPort(found.Addr)
-		if ip == "" || own[ip] || gateways[ip] {
-			continue
-		}
-		devices = append(devices, contract.DeviceSnapshot{Name: found.Name, IP: ip, Source: "mdns"})
+	var devices []contract.DeviceSnapshot
+	if !opt.SkipNeighbors {
+		devices = neighbors(opt.ARPPath, own, gateways)
 	}
-	note := dhcpNote(opt.DHCPScopes)
-	return mergeDevices(devices), contract.CollectorRun{Collector: "lan", Status: "ok"}, note
+	if !opt.SkipMDNS {
+		for _, found := range browse(ctx) {
+			ip, _, _ := net.SplitHostPort(found.Addr)
+			if ip == "" || own[ip] || gateways[ip] {
+				continue
+			}
+			devices = append(devices, contract.DeviceSnapshot{Name: found.Name, IP: ip, Source: "mdns"})
+		}
+	}
+	note := ""
+	if !opt.SkipDHCP {
+		note = dhcpNote(opt.DHCPScopes)
+	}
+	status := "ok"
+	if opt.SkipNeighbors && opt.SkipMDNS && opt.SkipDHCP {
+		status = "skipped"
+	}
+	return mergeDevices(devices), contract.CollectorRun{Collector: "lan", Status: status}, note
 }
 
 func neighbors(path string, own, gateways map[string]bool) []contract.DeviceSnapshot {

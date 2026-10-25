@@ -10,8 +10,8 @@ import (
 )
 
 type Core struct {
-	Name string
-	Addr string
+	Name string `json:"name"`
+	Addr string `json:"addr"`
 }
 
 var (

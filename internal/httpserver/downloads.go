@@ -18,9 +18,11 @@ type Download struct {
 
 func nodeDownloads() []Download {
 	return []Download{
-		{ID: "windows-amd64", OS: "windows", Arch: "amd64", Title: "Windows", File: "brightnet-node-windows-amd64.exe", Note: "Ligne de commande. Une fenêtre pourra s'y ajouter, ou le programme rester en CLI."},
+		{ID: "bnnp-windows", OS: "windows", Arch: "amd64", Title: "BNNP", File: "brightnet-bnnp-windows-amd64.exe", Note: "BrightNet Node Parameter. Choisit ce que cette machine envoie."},
+		{ID: "bnca-windows", OS: "windows", Arch: "amd64", Title: "BNCA", File: "brightnet-bnca-windows-amd64.exe", Note: "BrightNet Core Admin. Gère le Core, sans collecter cette machine."},
 		{ID: "linux-amd64", OS: "linux", Arch: "amd64", Title: "Linux", File: "brightnet-node-linux-amd64", Note: "Même programme, pour un PC Linux 64 bits."},
 		{ID: "linux-arm64", OS: "linux", Arch: "arm64", Title: "Linux", File: "brightnet-node-linux-arm64", Note: "Même programme, pour une machine ARM 64 bits."},
+		{ID: "android", OS: "android", Arch: "universal", Title: "Android", File: "brightnet-android.apk", Note: "BrightNet sur le téléphone. Même carte, plein écran."},
 	}
 }
 

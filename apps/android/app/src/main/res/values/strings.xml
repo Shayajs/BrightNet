@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BrightNet</string>
+    <string name="gate_help">L’adresse du Core sur le réseau. Le téléphone affiche la carte, il ne collecte rien.</string>
+    <string name="address_hint">http://192.168.1.3:1717</string>
+    <string name="address_default">http://192.168.1.3:1717</string>
+    <string name="open">Ouvrir</string>
+    <string name="bad_address">Cette adresse n’est pas celle d’un Core.</string>
+    <string name="unreachable">Le Core ne répond pas.</string>
+    <string name="bad_certificate">Le certificat du Core est refusé.</string>
+    <string name="blocked">Ce lien sort du Core.</string>
+    <string name="retry">Réessayer</string>
+    <string name="change">Changer d’adresse</string>
+    <string name="downloading">Téléchargement lancé.</string>
+</resources>
