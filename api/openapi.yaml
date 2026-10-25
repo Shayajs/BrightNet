@@ -1,0 +1,188 @@
+openapi: 3.0.3
+info:
+  title: BrightNet
+  version: 0.1.0
+  description: Contrat HTTP du MVP local. Les vues dns, communications et application sont réservées et renvoient un graphe vide.
+servers:
+  - url: http://127.0.0.1:8787
+paths:
+  /api/v1/health:
+    get:
+      summary: Santé du processus
+      responses:
+        "200":
+          description: Processus disponible
+  /api/v1/setup/status:
+    get:
+      summary: Indique si le premier administrateur doit être créé
+      responses:
+        "200":
+          description: État
+  /api/v1/setup:
+    post:
+      summary: Crée le premier administrateur, une seule fois
+      responses:
+        "201":
+          description: Créé
+        "409":
+          description: Déjà configuré
+  /api/v1/login:
+    post:
+      summary: Ouvre une session locale
+      responses:
+        "200":
+          description: Cookie de session
+        "401":
+          description: Identifiants refusés
+  /api/v1/logout:
+    post:
+      summary: Ferme la session
+      responses:
+        "200":
+          description: Session fermée
+  /api/v1/me:
+    get:
+      summary: Utilisateur courant
+      responses:
+        "200":
+          description: Session valide
+        "401":
+          description: Authentification requise
+  /api/v1/summary:
+    get:
+      summary: Agents et volume de l'inventaire
+      responses:
+        "200":
+          description: Résumé
+  /api/v1/graph:
+    get:
+      summary: Projection du graphe
+      parameters:
+        - in: query
+          name: view
+          schema:
+            type: string
+            enum: [docker, physical, logical, dns, communications, application]
+      responses:
+        "200":
+          description: Nœuds et relations de la vue
+  /api/v1/entities/{id}:
+    get:
+      summary: Détail d'une entité
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Entité et relations
+    patch:
+      summary: Change le nom affiché sans modifier la clé technique
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Nom enregistré
+  /api/v1/events:
+    get:
+      summary: Derniers événements
+      responses:
+        "200":
+          description: Liste
+  /api/v1/events/stream:
+    get:
+      summary: Flux SSE des changements
+      responses:
+        "200":
+          description: Événements graph.changed et activity
+  /api/v1/layouts/{view}:
+    get:
+      summary: Positions enregistrées
+      parameters:
+        - in: path
+          name: view
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Objet de positions
+    put:
+      summary: Enregistre les positions
+      parameters:
+        - in: path
+          name: view
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Enregistré
+  /api/v1/pairing-codes:
+    post:
+      summary: Crée un code d'appairage à usage unique
+      responses:
+        "201":
+          description: Code en clair, affiché une fois
+  /api/v1/fixtures/load:
+    post:
+      summary: Ajoute un graphe explicitement simulé
+      responses:
+        "200":
+          description: Fixture chargée
+  /api/v1/agents/enroll:
+    post:
+      summary: Échange un code d'appairage contre un jeton d'agent
+      responses:
+        "201":
+          description: Jeton remis une seule fois
+        "401":
+          description: Code refusé
+  /api/v1/agents/{id}/heartbeat:
+    post:
+      summary: Battement de cœur
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Intervalle et collecteurs autorisés
+  /api/v1/agents/{id}/snapshot:
+    post:
+      summary: Instantané brightnet.ingest.v1
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Instantané accepté
+        "400":
+          description: Corps refusé
+        "401":
+          description: Jeton refusé
+  /api/v1/agents/{id}/events:
+    post:
+      summary: Événements Docker observés
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Événements acceptés
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: brightnet_session
+    agentBearer:
+      type: http
+      scheme: bearer

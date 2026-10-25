@@ -1,0 +1,65 @@
+name: brightnet
+
+services:
+  core:
+    build:
+      context: ../..
+      dockerfile: apps/core/Dockerfile
+    environment:
+      BRIGHTNET_LISTEN: 0.0.0.0:8787
+      BRIGHTNET_UI_LISTEN: 0.0.0.0:1717
+      BRIGHTNET_BNCP_LISTEN: 0.0.0.0:1718
+      BRIGHTNET_WEB_ROOT: /usr/local/share/brightnet/web
+      BRIGHTNET_DATA: /data/brightnet.db
+      BRIGHTNET_ADMIN_USER: ${BRIGHTNET_ADMIN_USER:-admin}
+      BRIGHTNET_ADMIN_PASSWORD: ${BRIGHTNET_ADMIN_PASSWORD:-brightnet-dev}
+      BRIGHTNET_DEV_PAIRING_CODE: ${BRIGHTNET_DEV_PAIRING_CODE:-brightnet-dev-pair}
+    ports:
+      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:1717:1717"
+      - "127.0.0.1:1718:1718"
+    volumes:
+      - brightnet-data:/data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/brightnet-core", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    environment:
+      VITE_API_PROXY: http://core:8787
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      core:
+        condition: service_healthy
+
+  agent:
+    build:
+      context: ../..
+      dockerfile: apps/agent/Dockerfile
+    environment:
+      BRIGHTNET_BNCP_ADDR: core:1718
+      BRIGHTNET_PAIRING_CODE: ${BRIGHTNET_DEV_PAIRING_CODE:-brightnet-dev-pair}
+      BRIGHTNET_STATE: /state/agent.json
+      BRIGHTNET_DOCKER_SOCKET: /var/run/docker.sock
+      BRIGHTNET_MACHINE_ID_PATH: /host/machine-id
+      BRIGHTNET_HOSTNAME_PATH: /host/hostname
+      BRIGHTNET_IN_CONTAINER: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/machine-id:/host/machine-id:ro
+      - /etc/hostname:/host/hostname:ro
+      - brightnet-agent:/state
+    depends_on:
+      core:
+        condition: service_healthy
+
+volumes:
+  brightnet-data:
+  brightnet-agent:

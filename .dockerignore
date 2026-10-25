@@ -1,0 +1,8 @@
+.git
+data
+**/.env
+apps/web/node_modules
+apps/web/dist
+*.db
+*.db-wal
+*.db-shm
