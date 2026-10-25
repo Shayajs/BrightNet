@@ -14,6 +14,7 @@ import (
 
 	"brightnet/apps/agent/internal/collectors/docker"
 	"brightnet/apps/agent/internal/collectors/host"
+	"brightnet/apps/agent/internal/collectors/lan"
 	"brightnet/apps/agent/internal/dockerclient"
 	"brightnet/internal/bncp"
 	"brightnet/internal/contract"
@@ -30,6 +31,7 @@ type Config struct {
 	MachineIDPath string
 	HostnamePath  string
 	InContainer   bool
+	DHCPScopes    string
 }
 
 type state struct {
@@ -39,13 +41,14 @@ type state struct {
 }
 
 type Agent struct {
-	cfg       Config
-	client    *http.Client
-	wire      wire
-	mu        sync.RWMutex
-	collectMu sync.Mutex
-	state     state
-	queue     []contract.DockerEvent
+	cfg        Config
+	client     *http.Client
+	wire       wire
+	mu         sync.RWMutex
+	collectMu  sync.Mutex
+	state      state
+	queue      []contract.DockerEvent
+	knownPeers map[string]bool
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -54,7 +57,10 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	agent := &Agent{cfg: cfg, client: &http.Client{Timeout: 30 * time.Second}}
 	if cfg.BNCPAddr != "" {
-		agent.wire = bncpWire{client: &bncp.Client{Addr: cfg.BNCPAddr}}
+		client := &bncp.Client{Addr: cfg.BNCPAddr, OnDirect: func(msg bncp.Direct) {
+			slog.Info("dBNCP", "de", msg.From, "message", msg.Payload)
+		}}
+		agent.wire = bncpWire{client: client}
 	} else {
 		agent.wire = httpWire{agent: agent}
 	}
@@ -101,10 +107,13 @@ func (a *Agent) heartbeats(ctx context.Context) {
 			cfg, err := a.wire.Heartbeat(ctx, a.agentID(), a.token())
 			if errors.Is(err, errUnauthorized) {
 				_ = a.enroll(ctx)
-			} else if err == nil && cfg.SnapshotIntervalSeconds > 0 {
-				a.mu.Lock()
-				a.state.Interval = cfg.SnapshotIntervalSeconds
-				a.mu.Unlock()
+			} else if err == nil {
+				if cfg.SnapshotIntervalSeconds > 0 {
+					a.mu.Lock()
+					a.state.Interval = cfg.SnapshotIntervalSeconds
+					a.mu.Unlock()
+				}
+				a.greet(ctx, cfg.Peers)
 			}
 		}
 	}
@@ -186,10 +195,12 @@ func (a *Agent) snapshot(ctx context.Context) {
 	if dockerRun.Status == "" {
 		dockerRun = contract.CollectorRun{Collector: "docker", Status: "error", Error: "collecteur interrompu"}
 	}
+	devices, lanRun, dhcp := lan.Collect(ctx, lan.Options{DHCPScopes: a.cfg.DHCPScopes})
+	hostSnap.DHCP = dhcp
 	body := contract.Snapshot{
 		Version: contract.Version, CollectedAt: time.Now().UTC(),
-		Host: hostSnap, Docker: &dockerSnap,
-		CollectorRuns: []contract.CollectorRun{hostRun, dockerRun},
+		Host: hostSnap, Devices: devices, Docker: &dockerSnap,
+		CollectorRuns: []contract.CollectorRun{hostRun, dockerRun, lanRun},
 	}
 	cfg, err := a.wire.Snapshot(ctx, a.agentID(), a.token(), body)
 	if errors.Is(err, errUnauthorized) {
@@ -208,6 +219,26 @@ func (a *Agent) snapshot(ctx context.Context) {
 		a.mu.Unlock()
 		if err != nil {
 			slog.Warn("état local non enregistré", "err", err)
+		}
+	}
+}
+
+func (a *Agent) greet(ctx context.Context, peers []string) {
+	a.mu.Lock()
+	if a.knownPeers == nil {
+		a.knownPeers = map[string]bool{}
+	}
+	var fresh []string
+	for _, peer := range peers {
+		if !a.knownPeers[peer] {
+			a.knownPeers[peer] = true
+			fresh = append(fresh, peer)
+		}
+	}
+	a.mu.Unlock()
+	for _, peer := range fresh {
+		if err := a.wire.Direct(ctx, a.agentID(), a.token(), peer, "présent"); err != nil {
+			slog.Debug("dBNCP non ouvert", "pair", peer, "err", err)
 		}
 	}
 }

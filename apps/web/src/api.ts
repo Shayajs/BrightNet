@@ -33,7 +33,7 @@ export const api = {
   logout: () => request('/api/v1/logout', { method: 'POST' }),
   me: () => request<{ username: string }>('/api/v1/me'),
   summary: () => request<Summary>('/api/v1/summary'),
-  graph: (view: string) => request<Graph>(`/api/v1/graph?view=${encodeURIComponent(view)}`),
+  graph: (view: string, focus = '') => request<Graph>(`/api/v1/graph?view=${encodeURIComponent(view)}${focus ? `&focus=${encodeURIComponent(focus)}` : ''}`),
   events: () => request<{ events: Activity[] }>('/api/v1/events'),
   layout: (view: string) => request<Record<string, { x: number; y: number }>>(`/api/v1/layouts/${view}`),
   saveLayout: (view: string, positions: Record<string, { x: number; y: number }>) =>
@@ -42,4 +42,15 @@ export const api = {
     request(`/api/v1/entities/${id}`, { method: 'PATCH', body: JSON.stringify({ display_name: displayName }) }),
   loadFixture: () => request('/api/v1/fixtures/load', { method: 'POST' }),
   pairingCode: () => request<{ pairing_code: string; expires_at: string }>('/api/v1/pairing-codes', { method: 'POST' }),
+  downloads: () => request<{ downloads: Download[] }>('/api/v1/downloads'),
+}
+
+export type Download = {
+  id: string
+  os: string
+  arch: string
+  title: string
+  file: string
+  note: string
+  available: boolean
 }

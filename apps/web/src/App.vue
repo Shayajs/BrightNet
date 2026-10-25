@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from './api'
 import GraphCanvas from './components/GraphCanvas.vue'
+import Home from './components/Home.vue'
+import type { Download } from './api'
 import { evidenceLabel, kindLabel, originLabel, statusLabel, views } from './labels'
 import type { Activity, Graph, GraphNode, Position, Summary } from './types'
 
@@ -11,7 +13,8 @@ const error = ref('')
 const username = ref('')
 const password = ref('')
 const sessionUser = ref('')
-const view = ref('docker')
+const view = ref('network')
+const focus = ref('')
 const graph = ref<Graph | null>(null)
 const summary = ref<Summary | null>(null)
 const events = ref<Activity[]>([])
@@ -23,6 +26,7 @@ const animations = ref(localStorage.getItem('brightnet-animations') !== 'off')
 const theme = ref(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark')
 const kinds = ref<Record<string, boolean>>({})
 const pairing = ref('')
+const downloads = ref<Download[]>([])
 const canvas = ref<{ focus: (id: string) => void } | null>(null)
 let source: EventSource | null = null
 let saveTimer = 0
@@ -48,6 +52,7 @@ watch(graph, (value) => {
 }, { deep: true })
 
 onMounted(async () => {
+  downloads.value = (await api.downloads().catch(() => ({ downloads: [] }))).downloads
   try {
     const status = await api.setupStatus()
     if (status.needs_setup) {
@@ -82,7 +87,7 @@ async function submitAuth(kind: 'login' | 'setup') {
 
 async function refresh() {
   const [nextGraph, nextSummary, nextEvents, nextLayout] = await Promise.all([
-    api.graph(view.value),
+    api.graph(view.value, focus.value),
     api.summary(),
     api.events(),
     api.layout(view.value).catch(() => ({})),
@@ -95,6 +100,7 @@ async function refresh() {
 
 async function changeView(next: string) {
   view.value = next
+  focus.value = ''
   selectedId.value = ''
   await refresh()
 }
@@ -102,10 +108,18 @@ async function changeView(next: string) {
 function connect() {
   source?.close()
   source = new EventSource('/api/v1/events/stream')
+  let refreshTimer = 0
   source.onmessage = (message) => {
-    const payload = JSON.parse(message.data) as { type: string, event?: Activity }
+    const payload = JSON.parse(message.data) as { type: string, id?: string, label?: string, event?: Activity }
     if (payload.type === 'activity' && payload.event) events.value = [payload.event, ...events.value].slice(0, 80)
-    if (payload.type === 'graph.changed') void api.graph(view.value).then((value) => { graph.value = value })
+    if (payload.type === 'entity.updated' && payload.id && graph.value) {
+      const node = graph.value.nodes.find((item) => item.id === payload.id)
+      if (node && payload.label) node.label = payload.label
+    }
+    if (payload.type === 'graph.changed') {
+      window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => { void api.graph(view.value, focus.value).then((value) => { graph.value = value }) }, 120)
+    }
   }
 }
 
@@ -145,7 +159,18 @@ function toggleTheme() {
 
 function choose(id: string) {
   selectedId.value = id
+  const node = graph.value?.nodes.find((item) => item.id === id)
+  if (view.value === 'network' && node && (node.kind === 'host' || node.kind === 'device' || node.kind === 'router') && focus.value !== id) {
+    focus.value = id
+    void refresh()
+  }
   canvas.value?.focus(id)
+}
+
+function clearFocus() {
+  focus.value = ''
+  selectedId.value = ''
+  void refresh()
 }
 
 function propertyEntries(node: GraphNode) {
@@ -170,17 +195,7 @@ function clock(value?: string) {
 
 <template>
   <main v-if="mode === 'loading'" class="gate">BrightNet</main>
-  <main v-else-if="mode === 'setup' || mode === 'login'" class="gate">
-    <form class="card" @submit.prevent="submitAuth(mode === 'setup' ? 'setup' : 'login')">
-      <p class="eyebrow">Infrastructure locale</p>
-      <h1>BrightNet</h1>
-      <p class="lede">{{ mode === 'setup' ? 'Créez le compte administrateur de cette machine.' : 'Le graphe reste sur cette machine.' }}</p>
-      <label>Identifiant <input v-model="username" autocomplete="username" required /></label>
-      <label>Mot de passe <input v-model="password" type="password" autocomplete="current-password" required /></label>
-      <p v-if="error" class="error">{{ error }}</p>
-      <button type="submit">{{ mode === 'setup' ? 'Créer l’accès' : 'Entrer' }}</button>
-    </form>
-  </main>
+  <Home v-else-if="mode === 'setup' || mode === 'login'" v-model:username="username" v-model:password="password" :mode="mode" :error="error" :downloads="downloads" @submit="submitAuth(mode === 'setup' ? 'setup' : 'login')" @theme="toggleTheme" />
   <div v-else class="shell">
     <header class="top">
       <div class="brand">BrightNet <span>{{ sessionUser }}</span></div>
@@ -204,6 +219,8 @@ function clock(value?: string) {
           {{ item.label }}<small v-if="!item.fed">vide</small>
         </button>
       </div>
+      <p v-if="view === 'network'" class="hint">Le réseau d’abord. Cliquez un appareil pour ouvrir ce qu’il contient.</p>
+      <button v-if="focus" type="button" class="ghost" @click="clearFocus">Revenir au réseau</button>
       <div class="filters">
         <label v-for="(enabled, kind) in kinds" :key="kind"><input v-model="kinds[kind]" type="checkbox" /> {{ kindLabel[kind] || kind }}</label>
       </div>

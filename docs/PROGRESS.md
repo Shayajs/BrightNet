@@ -29,23 +29,27 @@ Vérifié le 25 octobre 2026, en lecture seule : l'antenne `192.168.100.1:9200` 
 
 ## Problèmes connus
 
-- Le Raspberry Pi n’a pas été contacté. Modèle, RAM, OS et rôles de Pi-hole et Technitium restent inconnus. Le premier résolveur vu par WSL est `192.168.1.3` ; on ne sait pas s’il fait aussi le DHCP.
+- Le Raspberry Pi 3 B+ porte le Core. Technitium écoute sur 53 et 5380 ; CouchDB sur 5984. Aucun Pi-hole. On n'a pas lu s'il fait le DHCP.
 - La route par défaut de Windows n’a pas pu être lue depuis WSL. Le routeur Starlink sert `192.168.1.1/24`, sans preuve que Windows l’utilise comme passerelle.
 - L’adresse IPv4 WAN Starlink, CGNAT ou publique, n’apparaît pas dans les diagnostics lus.
 - L’agent Compose tourne dans le netns du conteneur (`observation_scope` agent). Les vues physique (2 nœuds) et logique (4 nœuds) décrivent ce netns, plus le nom d’hôte et le `machine-id` montés depuis l’hôte. Les interfaces WSL complètes ne sont pas vues.
-- Pas de statistiques CPU, pas de TLS, pas de scan du LAN. L’écoute publiée reste `127.0.0.1`.
+- Pas de statistiques CPU, pas de TLS. Sur le Pi, `1717` est en HTTP et lié à `192.168.1.3` ; `1718` reste sur `127.0.0.1`. Pas de scan du LAN.
 - Le graphe complet est dense. Le cadrage initial tient dans la vue ; un filtre ne recadre pas automatiquement.
 - L’inventaire latéral est long : l’élément recherché peut demander un défilement avant le clic.
 - Le code d’appairage `brightnet-dev-pair` est réutilisable, uniquement pour ce Compose local.
 
-## BNCP — codé, testé localement
+## Pi — installé le 25 octobre 2026
 
-Vérifié par `go test ./...` après l'ajout du protocole : trames trop courtes, mauvaise version et corps CBOR ; deux Node avec le même `machine-id` produisent un hôte et conservent chacun son interface. L'API JSON d'ingestion reste en place. Les ports `1717` et `1718` sont prévus sur `127.0.0.1`. Le Pi n'a pas été contacté. L'image Compose qui embarque l'interface n'a pas été reconstruite dans cette étape.
+`shayajs@192.168.1.3` a refusé la clé. Le compte `shaya` a permis l'audit puis l'installation. Technitium et CouchDB n'ont pas été arrêtés.
+
+Vérifié après démarrage : Core sain, interface française sur `http://192.168.1.3:1717`, Node enrollé en BNCP vers `192.168.1.3:1718`. La vue Simple montre le réseau, la passerelle et les appareils vus par mDNS, par la table des voisins, ou par un bail DHCP. dBNCP relie deux Node connectés au Core. Le mot de passe n'est pas celui de développement ; il est seulement dans `~/brightnet/.env` sur le Pi.
+
+L'interface est en HTTP, liée à `192.168.1.3`. BNCP écoute aussi `192.168.1.3:1718` et le Core s'annonce en mDNS. Le client Node ne parle pas encore TLS. Le code d'appairage réutilisable a été retiré du Pi au moment de cette ouverture. L'image Compose locale de WSL n'a pas été reconstruite.
 
 ## Prochains travaux recommandés
 
-1. Reconstruire l'image Compose pour servir l'interface sur `1717`, puis vérifier le Node en BNCP.
-2. Phase 2 Technitium, après lecture de la version installée. Starlink ne la précède pas.
-3. Audit en lecture seule du Raspberry Pi, seulement après une demande explicite. Il dira si le Pi est seulement résolveur ou aussi DHCP. Le Core n'y est pas copié avant ça.
-4. Connecteur Starlink en lecture seule, désactivé par défaut, selon `docs/INTEGRATIONS.md`.
-5. Lancer le Node sur l’hôte WSL si les interfaces réelles doivent apparaître.
+1. Reconstruire l'image Compose locale, puis vérifier le Node WSL en BNCP.
+2. Phase 2 Technitium, en lecture seule d'abord. Starlink ne la précède pas.
+3. TLS sur `1717` avant d'élargir l'écoute au-delà de `192.168.1.3`.
+4. Connecteur Starlink en lecture seule, désactivé par défaut.
+5. Lancer le Node sur l’hôte WSL si les interfaces réelles de ce poste doivent apparaître.

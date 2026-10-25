@@ -9,6 +9,14 @@ func HostKey(agentID, machineID string) string {
 	return "host:agent:" + agentID
 }
 
+func RouterKey(agentID, machineID, gateway string) string {
+	scope := machineID
+	if scope == "" {
+		scope = agentID
+	}
+	return "router:" + scope + ":" + gateway
+}
+
 func ContainerKey(engineID, name string, labels map[string]string) (string, string) {
 	project := labels["com.docker.compose.project"]
 	service := labels["com.docker.compose.service"]

@@ -9,6 +9,12 @@ func TestHostKeyGroupsMachine(t *testing.T) {
 	if HostKey("a", "") == HostKey("b", "") {
 		t.Fatal("sans machine-id, chaque Node reste un hôte")
 	}
+	if RouterKey("a", "machine", "192.0.2.1") != RouterKey("b", "machine", "192.0.2.1") {
+		t.Fatal("la passerelle d'une machine ne doit pas dépendre du Node")
+	}
+	if RouterKey("a", "machine", "192.0.2.1") == RouterKey("a", "autre", "192.0.2.1") {
+		t.Fatal("la même adresse sur deux machines reste deux routeurs")
+	}
 }
 
 func TestContainerKeyStableAcrossRecreate(t *testing.T) {

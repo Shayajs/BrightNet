@@ -21,29 +21,26 @@ Le test de cycle de vie utilise uniquement un conteneur jetable nommé `brightne
 
 L'agent lancé dans WSL voit le moteur Linux de Docker Desktop. Il ne voit pas Windows comme une machine distincte, ni le trafic du réseau domestique.
 
-## Raspberry Pi — non contacté
+## Raspberry Pi — lu le 25 octobre 2026
 
-Adresse prévue : `192.168.1.3`, utilisateur SSH `shaya`. Aucune connexion n'a été tentée.
+`shayajs@192.168.1.3` refuse la clé présente sur ce poste (`Permission denied (publickey,password)`). Le compte `shaya` accepte `~/.ssh/id_ed25519`. Aucun mot de passe n'a été utilisé. Le compte `shayajs` n'existe pas sur la machine.
 
-Inconnus : modèle, RAM, architecture, système, version de Docker et de Compose, conteneurs, ports, volumes, charge, et place disponible.
+| Élément | Constat |
+| --- | --- |
+| Modèle | Raspberry Pi 3 Model B Plus Rev 1.3 |
+| Système | Ubuntu 24.04.3 LTS, noyau `6.8.0-1065-raspi`, aarch64, 4 cœurs |
+| Mémoire | 899 Mio, environ 456 Mio disponibles, swap 2 Gio dont 175 Mio utilisés |
+| Disque | 29 Go, 16 Go libres sur `/` |
+| Route | `default via 192.168.1.1 dev eth0`, adresse `192.168.1.3/24` |
+| Docker | Engine 29.1.3 arm64, Compose v5.0.1. `shaya` est dans le groupe `docker` |
+| Conteneurs | `technitium-dns` (`technitium/dns-server:latest`, ports 53 et 5380) et `obsidian-couchdb` (`couchdb:latest`, port 5984), tous deux démarrés depuis 2 jours. Un `hello-world` est arrêté. Aucun Pi-hole |
+| Ports hôtes | 22, 53, 5380, 5984, 5201 |
 
-Conséquence : le Pi n'est pas retenu comme hôte du Core tant qu'un audit en lecture seule n'a pas été approuvé. S'il manque de ressources, il pourra plus tard porter une coordination légère, les traitements restant sur une autre machine.
-
-### Audit futur, en lecture seule
-
-À n'exécuter qu'après accord explicite :
-
-1. `ssh shaya@192.168.1.3` puis relever le modèle (`cat /proc/device-tree/model`), `uname -a`, `nproc`, `free -h`, `df -h`, `/etc/os-release`.
-2. `docker version`, `docker compose version`, `docker ps`, `docker stats --no-stream`, ports en écoute.
-3. Identifier Pi-hole et Technitium sans les redémarrer et sans lire leurs secrets.
-4. Estimer la RAM supplémentaire du Core (cible inférieure à 80 Mo au repos) et de l'agent (cible inférieure à 40 Mo).
-5. Préparer une sauvegarde des volumes concernés et une procédure de retour arrière avant toute installation.
-
-Interdit sans accord : arrêter, supprimer, mettre à jour ou modifier un conteneur ou la configuration DNS existants.
+Technitium et CouchDB n'ont pas été arrêtés, ni inspectés au-delà du nom, de l'image et des ports. Le Pi tient le Core et un Node si les images sont construites ailleurs : compiler sur place épuiserait la mémoire.
 
 ## Accès Internet Starlink — lecture du 25 octobre 2026
 
-Une seule série de lectures, sans écriture et sans parcours du réseau. Le Raspberry Pi `192.168.1.3` n'a pas été contacté.
+Une seule série de lectures, sans écriture et sans parcours du réseau. Le Raspberry Pi a été audité plus tard ; voir la section ci-dessus. Au moment de ces lectures Starlink, il n'avait pas encore été contacté.
 
 | Fait | Constat |
 | --- | --- |

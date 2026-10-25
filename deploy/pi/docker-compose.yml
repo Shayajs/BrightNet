@@ -1,0 +1,46 @@
+name: brightnet
+
+services:
+  core:
+    image: brightnet-pi-core:0.1
+    network_mode: host
+    env_file: .env
+    environment:
+      BRIGHTNET_DATA: /data/brightnet.db
+      BRIGHTNET_LISTEN: 127.0.0.1:8787
+      BRIGHTNET_UI_LISTEN: 192.168.1.3:1717
+      BRIGHTNET_BNCP_LISTEN: 192.168.1.3:1718
+      BRIGHTNET_WEB_ROOT: /usr/local/share/brightnet/web
+      BRIGHTNET_DOWNLOADS: /var/lib/brightnet/downloads
+    volumes:
+      - data:/data
+    healthcheck:
+      test: ["CMD", "/brightnet-core", "health"]
+      interval: 15s
+      timeout: 3s
+      retries: 8
+    restart: unless-stopped
+  node:
+    image: brightnet-pi-node:0.1
+    network_mode: host
+    env_file: .env
+    environment:
+      BRIGHTNET_BNCP_ADDR: 192.168.1.3:1718
+      BRIGHTNET_STATE: /var/lib/brightnet-node/state.json
+      BRIGHTNET_MACHINE_ID_PATH: /host/machine-id
+      BRIGHTNET_HOSTNAME_PATH: /host/hostname
+      BRIGHTNET_DHCP_SCOPES: /host/dhcp
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/machine-id:/host/machine-id:ro
+      - /etc/hostname:/host/hostname:ro
+      - /home/shaya/technitium/config/scopes:/host/dhcp:ro
+      - node-state:/var/lib/brightnet-node
+    depends_on:
+      core:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  data:
+  node-state:

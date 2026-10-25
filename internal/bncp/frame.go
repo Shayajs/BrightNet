@@ -29,6 +29,8 @@ const (
 	TypeSnapshotAck
 	TypeEvents
 	TypeEventsAck
+	TypeDirect
+	TypeDirectAck
 	TypeError uint8 = 255
 )
 

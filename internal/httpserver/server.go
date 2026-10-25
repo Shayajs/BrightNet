@@ -5,31 +5,35 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
+	"brightnet/internal/bus"
 	"brightnet/internal/contract"
-	"brightnet/internal/hub"
 	"brightnet/internal/store"
 )
 
 const sessionCookie = "brightnet_session"
 
 type Server struct {
-	Store *store.Store
-	Hub   *hub.Hub
-	limit limiter
+	Store     *store.Store
+	Bus       *bus.Bus
+	Downloads string
+	limit     limiter
 }
 
-func New(st *store.Store, h *hub.Hub) *Server {
-	return &Server{Store: st, Hub: h, limit: limiter{hits: map[string][]time.Time{}}}
+func New(st *store.Store, b *bus.Bus) *Server {
+	return &Server{Store: st, Bus: b, limit: limiter{hits: map[string][]time.Time{}}}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
+	mux.HandleFunc("GET /api/v1/downloads", s.downloads)
+	mux.HandleFunc("GET /api/v1/downloads/{file}", s.downloadFile)
 	mux.HandleFunc("GET /api/v1/setup/status", s.setupStatus)
 	mux.HandleFunc("POST /api/v1/setup", s.setup)
 	mux.HandleFunc("POST /api/v1/login", s.login)
@@ -142,9 +146,9 @@ func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
 	}
 	view := r.URL.Query().Get("view")
 	if view == "" {
-		view = "docker"
+		view = "network"
 	}
-	graph, err := s.Store.Graph(r.Context(), view)
+	graph, err := s.Store.Graph(r.Context(), view, r.URL.Query().Get("focus"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "graphe indisponible")
 		return
@@ -184,7 +188,8 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "entité introuvable")
 		return
 	}
-	s.Hub.Publish(map[string]string{"type": "graph.changed"})
+	s.Bus.Publish(map[string]any{"type": "entity.updated", "id": r.PathValue("id"), "label": name})
+	s.Bus.Publish(map[string]string{"type": "graph.changed"})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -212,21 +217,36 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	ch, cancel := s.Hub.Subscribe()
+	var since uint64
+	if raw := r.Header.Get("Last-Event-ID"); raw != "" {
+		since, _ = strconv.ParseUint(raw, 10, 64)
+	}
+	past, ch, cancel := s.Bus.Subscribe(since)
 	defer cancel()
 	_, _ = io.WriteString(w, ": ok\n\n")
 	flusher.Flush()
+	writeEvent := func(ev bus.Event) {
+		_, _ = io.WriteString(w, "id: ")
+		_, _ = io.WriteString(w, strconv.FormatUint(ev.ID, 10))
+		_, _ = io.WriteString(w, "\ndata: ")
+		_, _ = w.Write(ev.Body)
+		_, _ = io.WriteString(w, "\n\n")
+		flusher.Flush()
+	}
+	for _, ev := range past {
+		writeEvent(ev)
+	}
 	ping := time.NewTicker(20 * time.Second)
 	defer ping.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case msg := <-ch:
-			_, _ = io.WriteString(w, "data: ")
-			_, _ = w.Write(msg)
-			_, _ = io.WriteString(w, "\n\n")
-			flusher.Flush()
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			writeEvent(ev)
 		case <-ping.C:
 			_, _ = io.WriteString(w, ": ping\n\n")
 			flusher.Flush()
@@ -382,10 +402,10 @@ func (s *Server) dockerEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) publish(result store.ApplyResult) {
 	for _, activity := range result.Activities {
-		s.Hub.Publish(map[string]any{"type": "activity", "event": activity})
+		s.Bus.Publish(map[string]any{"type": "activity", "event": activity})
 	}
 	if result.Changed {
-		s.Hub.Publish(map[string]string{"type": "graph.changed"})
+		s.Bus.Publish(map[string]string{"type": "graph.changed"})
 	}
 }
 
@@ -439,7 +459,7 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func knownView(view string) bool {
 	switch view {
-	case "docker", "physical", "logical":
+	case "docker", "physical", "logical", "network", "complex":
 		return true
 	default:
 		return false

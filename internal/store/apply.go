@@ -108,7 +108,91 @@ func (s *Store) ApplySnapshot(ctx context.Context, agentID string, snap contract
 				}
 			}
 		}
-		abs, err := markAbsent(tx, agentID, snap.Simulated, map[string]bool{"network_interface": true, "address": true}, seen, quiet, at)
+		nets, _, netChanged, netEvents, err := applyNetworks(tx, agentID, hostID, snap, seen, quiet, at)
+		if err != nil {
+			return ApplyResult{}, err
+		}
+		changed = changed || netChanged
+		activities = append(activities, netEvents...)
+		for _, gateway := range snap.Host.Gateways {
+			ip := net.ParseIP(strings.TrimSpace(gateway))
+			if ip == nil || ip.IsUnspecified() || ip.IsLoopback() {
+				continue
+			}
+			text := ip.String()
+			parent := networkFor(nets, text)
+			if parent == "" {
+				parent = hostID
+			}
+			key := ingest.RouterKey(agentID, snap.Host.MachineID, text)
+			routerID, ch, ev, err := upsertEntity(tx, entityWrite{
+				Kind: "router", Name: "Passerelle " + text, Key: key, ParentID: parent, Status: "online",
+				Simulated: snap.Simulated, AgentID: agentID, At: at,
+				Properties: map[string]any{"gateway": text, "role": "default"},
+			}, quiet)
+			if err != nil {
+				return ApplyResult{}, err
+			}
+			changed = changed || ch
+			activities = append(activities, ev...)
+			seen[key] = true
+			if _, err := relate(tx, hostID, routerID, "ROUTES_VIA", "observed", 1, map[string]any{"gateway": text}, agentID, at); err != nil {
+				return ApplyResult{}, err
+			}
+			if parent != hostID {
+				if _, err := relate(tx, routerID, parent, "SERVES", "observed", 1, nil, agentID, at); err != nil {
+					return ApplyResult{}, err
+				}
+			}
+		}
+		if ingest.RunStatus(snap.CollectorRuns, "lan") == "ok" {
+			for _, dev := range snap.Devices {
+				ip := net.ParseIP(strings.TrimSpace(dev.IP))
+				if dev.Name == "" || (ip != nil && (ip.IsLoopback() || ip.IsUnspecified())) {
+					continue
+				}
+				parent := hostID
+				if ip != nil {
+					if id := networkFor(nets, ip.String()); id != "" {
+						parent = id
+					}
+				}
+				key := deviceKey(agentID, snap.Host.MachineID, dev)
+				devID, ch, ev, err := upsertEntity(tx, entityWrite{
+					Kind: "device", Name: dev.Name, Key: key, ParentID: parent, Status: "online",
+					Simulated: snap.Simulated, AgentID: agentID, At: at,
+					Properties: map[string]any{"ip": dev.IP, "mac": dev.MAC, "découverte": dev.Source, "détail": dev.Detail},
+				}, quiet)
+				if err != nil {
+					return ApplyResult{}, err
+				}
+				changed = changed || ch
+				activities = append(activities, ev...)
+				seen[key] = true
+				if dev.IP != "" {
+					akey := "addr:" + key
+					addrID, ch, ev, err := upsertEntity(tx, entityWrite{
+						Kind: "address", Name: dev.IP, Key: akey, ParentID: devID, Status: "online",
+						Simulated: snap.Simulated, AgentID: agentID, At: at,
+						Properties: map[string]any{"ip": dev.IP, "découverte": dev.Source},
+					}, quiet)
+					if err != nil {
+						return ApplyResult{}, err
+					}
+					changed = changed || ch
+					activities = append(activities, ev...)
+					seen[akey] = true
+					if _, err := relate(tx, addrID, devID, "BELONGS_TO", "observed", 1, nil, agentID, at); err != nil {
+						return ApplyResult{}, err
+					}
+				}
+			}
+		}
+		absentKinds := map[string]bool{"network_interface": true, "address": true, "router": true, "network": true}
+		if ingest.RunStatus(snap.CollectorRuns, "lan") == "ok" {
+			absentKinds["device"] = true
+		}
+		abs, err := markAbsent(tx, agentID, snap.Simulated, absentKinds, seen, quiet, at)
 		if err != nil {
 			return ApplyResult{}, err
 		}
@@ -116,7 +200,7 @@ func (s *Store) ApplySnapshot(ctx context.Context, agentID string, snap contract
 			changed = true
 		}
 		activities = append(activities, abs...)
-		if err := staleRelations(tx, agentID, []string{"BELONGS_TO"}, at); err != nil {
+		if err := staleRelations(tx, agentID, []string{"BELONGS_TO", "ROUTES_VIA", "SERVES"}, at); err != nil {
 			return ApplyResult{}, err
 		}
 	}

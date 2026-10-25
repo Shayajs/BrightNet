@@ -2,6 +2,9 @@ export const kindLabel: Record<string, string> = {
   host: 'Hôte',
   network_interface: 'Interface',
   address: 'Adresse',
+  router: 'Routeur',
+  device: 'Appareil',
+  network: 'Réseau',
   docker_engine: 'Moteur Docker',
   docker_container: 'Conteneur',
   docker_network: 'Réseau Docker',
@@ -37,6 +40,8 @@ export const originLabel: Record<string, string> = {
 }
 
 export const views = [
+  { id: 'network', label: 'Simple', fed: true },
+  { id: 'complex', label: 'Complet', fed: true },
   { id: 'docker', label: 'Docker', fed: true },
   { id: 'physical', label: 'Physique', fed: true },
   { id: 'logical', label: 'Logique', fed: true },

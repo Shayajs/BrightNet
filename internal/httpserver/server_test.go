@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"brightnet/internal/bus"
 	"brightnet/internal/contract"
-	"brightnet/internal/hub"
 	"brightnet/internal/store"
 )
 
@@ -27,7 +27,7 @@ func newServer(t *testing.T) (*httptest.Server, *store.Store) {
 	if err := st.UpsertDevPairingCode(t.Context(), "pair-test", time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(st, hub.New()).Handler())
+	srv := httptest.NewServer(New(st, bus.New()).Handler())
 	t.Cleanup(srv.Close)
 	return srv, st
 }

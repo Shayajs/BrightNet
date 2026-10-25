@@ -9,19 +9,27 @@ import (
 	"sync"
 	"time"
 
+	"brightnet/internal/bus"
 	"brightnet/internal/contract"
-	"brightnet/internal/hub"
 	"brightnet/internal/store"
 )
 
 type Server struct {
 	Store *store.Store
-	Hub   *hub.Hub
+	Bus   *bus.Bus
 	limit limiter
+	mu    sync.Mutex
+	peers map[string]*session
 }
 
-func NewServer(st *store.Store, h *hub.Hub) *Server {
-	return &Server{Store: st, Hub: h, limit: limiter{hits: map[string][]time.Time{}}}
+type session struct {
+	conn    net.Conn
+	mu      sync.Mutex
+	agentID string
+}
+
+func NewServer(st *store.Store, b *bus.Bus) *Server {
+	return &Server{Store: st, Bus: b, limit: limiter{hits: map[string][]time.Time{}}, peers: map[string]*session{}}
 }
 
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
@@ -42,7 +50,11 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 }
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+	sess := &session{conn: conn}
+	defer func() {
+		s.unbind(sess)
+		_ = conn.Close()
+	}()
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
 		frame, err := Read(conn)
@@ -52,18 +64,25 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 			}
 			return
 		}
-		ack, body, err := s.dispatch(ctx, conn.RemoteAddr().String(), frame)
+		ack, body, err := s.dispatch(ctx, sess, conn.RemoteAddr().String(), frame)
 		if err != nil {
-			_ = writeValue(conn, TypeError, map[string]string{"error": err.Error()})
+			_ = sess.write(TypeError, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := writeValue(conn, ack, body); err != nil {
+		if err := sess.write(ack, body); err != nil {
 			return
 		}
 	}
 }
 
-func (s *Server) dispatch(ctx context.Context, remote string, frame Frame) (uint8, any, error) {
+func (sess *session) write(typ uint8, body any) error {
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	_ = sess.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return writeValue(sess.conn, typ, body)
+}
+
+func (s *Server) dispatch(ctx context.Context, sess *session, remote string, frame Frame) (uint8, any, error) {
 	switch frame.Type {
 	case TypeEnroll:
 		if !s.limit.allow(remote, 8, time.Minute) {
@@ -77,16 +96,20 @@ func (s *Server) dispatch(ctx context.Context, remote string, frame Frame) (uint
 		if err != nil {
 			return 0, nil, errors.New("code d'appairage invalide")
 		}
+		s.bind(sess, agentID)
 		return TypeEnrollAck, contract.NodeAck(agentID, token), nil
 	case TypeHeartbeat:
 		id, err := s.auth(ctx, frame.Body)
 		if err != nil {
 			return 0, nil, err
 		}
+		s.bind(sess, id)
 		if err := s.Store.TouchAgent(ctx, id); err != nil {
 			return 0, nil, errors.New("battement refusé")
 		}
-		return TypeHeartbeatAck, contract.NodeAck("", ""), nil
+		ack := contract.NodeAck("", "")
+		ack.Peers = s.peerIDs(id)
+		return TypeHeartbeatAck, ack, nil
 	case TypeSnapshot:
 		id, err := s.auth(ctx, frame.Body)
 		if err != nil {
@@ -98,6 +121,7 @@ func (s *Server) dispatch(ctx context.Context, remote string, frame Frame) (uint
 		if err := Unmarshal(frame.Body, &msg); err != nil {
 			return 0, nil, errors.New("instantané refusé")
 		}
+		s.bind(sess, id)
 		result, err := s.Store.ApplySnapshot(ctx, id, msg.Snapshot)
 		if err != nil {
 			return 0, nil, errors.New("instantané refusé")
@@ -109,6 +133,7 @@ func (s *Server) dispatch(ctx context.Context, remote string, frame Frame) (uint
 		if err != nil {
 			return 0, nil, err
 		}
+		s.bind(sess, id)
 		var msg struct {
 			Events []contract.DockerEvent `json:"events"`
 		}
@@ -121,6 +146,27 @@ func (s *Server) dispatch(ctx context.Context, remote string, frame Frame) (uint
 		}
 		s.publish(result)
 		return TypeEventsAck, contract.NodeAck("", ""), nil
+	case TypeDirect:
+		id, err := s.auth(ctx, frame.Body)
+		if err != nil {
+			return 0, nil, err
+		}
+		s.bind(sess, id)
+		var msg struct {
+			To      string `json:"to"`
+			Payload string `json:"payload"`
+		}
+		if err := Unmarshal(frame.Body, &msg); err != nil || msg.To == "" || msg.To == id || len(msg.Payload) > 1024 {
+			return 0, nil, errors.New("message direct refusé")
+		}
+		target := s.peer(msg.To)
+		if target == nil {
+			return 0, nil, errors.New("pair hors ligne")
+		}
+		if err := target.write(TypeDirect, map[string]string{"from": id, "payload": msg.Payload}); err != nil {
+			return 0, nil, errors.New("pair hors ligne")
+		}
+		return TypeDirectAck, map[string]bool{"ok": true}, nil
 	default:
 		return 0, nil, ErrType
 	}
@@ -142,11 +188,69 @@ func (s *Server) auth(ctx context.Context, body []byte) (string, error) {
 
 func (s *Server) publish(result store.ApplyResult) {
 	for _, activity := range result.Activities {
-		s.Hub.Publish(map[string]any{"type": "activity", "event": activity})
+		s.Bus.Publish(map[string]any{"type": "activity", "event": activity})
 	}
 	if result.Changed {
-		s.Hub.Publish(map[string]string{"type": "graph.changed"})
+		s.Bus.Publish(map[string]string{"type": "graph.changed"})
 	}
+}
+
+func (s *Server) bind(sess *session, agentID string) {
+	if agentID == "" {
+		return
+	}
+	s.mu.Lock()
+	if current := s.peers[agentID]; current != sess {
+		s.peers[agentID] = sess
+		sess.agentID = agentID
+		s.mu.Unlock()
+		s.syncPeers()
+		return
+	}
+	s.mu.Unlock()
+}
+
+func (s *Server) unbind(sess *session) {
+	s.mu.Lock()
+	if sess.agentID != "" && s.peers[sess.agentID] == sess {
+		delete(s.peers, sess.agentID)
+		s.mu.Unlock()
+		s.syncPeers()
+		return
+	}
+	s.mu.Unlock()
+}
+
+func (s *Server) peer(agentID string) *session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.peers[agentID]
+}
+
+func (s *Server) peerIDs(self string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := []string{}
+	for id := range s.peers {
+		if id != self {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func (s *Server) syncPeers() {
+	s.mu.Lock()
+	ids := make([]string, 0, len(s.peers))
+	for id := range s.peers {
+		ids = append(ids, id)
+	}
+	s.mu.Unlock()
+	if err := s.Store.SyncDirect(context.Background(), ids); err != nil {
+		slog.Debug("dBNCP non relié", "err", err)
+		return
+	}
+	s.Bus.Publish(map[string]string{"type": "graph.changed"})
 }
 
 func writeValue(w io.Writer, typ uint8, v any) error {

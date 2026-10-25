@@ -29,7 +29,9 @@ flowchart LR
   Web -->|"HTTP 1717, JSON et SSE"| Core
 ```
 
-BNCP version 1 : 4 octets `BNCP`, un octet de version, un octet de type, deux octets de drapeaux, quatre octets de longueur, puis le corps. Les drapeaux doivent être nuls. Le corps dépasse 2 Mio est refusé. Les types vont de l'appairage aux événements. Le jeton d'agent voyage dans le corps des messages après l'appairage, jamais dans une commande.
+BNCP version 1 : 4 octets `BNCP`, un octet de version, un octet de type, deux octets de drapeaux, quatre octets de longueur, puis le corps. Les drapeaux doivent être nuls. Le corps dépasse 2 Mio est refusé. Les types vont de l'appairage aux événements. Le jeton d'agent voyage dans le corps des messages après l'appairage, jamais dans une commande. Ce canal n'est pas repris par le navigateur.
+
+Sans `BRIGHTNET_BNCP_ADDR`, le Node cherche les Core annoncés en mDNS `_brightnet._tcp`. Une écoute sur `127.0.0.1` n'est pas annoncée. La page d'accueil sert les exécutables Windows et Linux du Node, et l'entrée web.
 
 L'interface et l'API JSON sont aussi disponibles sur `1717`. Le port `8787` conserve l'API seule, le temps que les clients existants basculent.
 
@@ -43,7 +45,7 @@ Responsabilités de cette version :
 - refuser la fusion d'entités dont la clé technique diffère ;
 - marquer absentes les entités disparues uniquement si le collecteur concerné a réussi ;
 - projeter les vues `docker`, `physical` et `logical` ;
-- diffuser un événement SSE `graph.changed` après chaque changement ;
+- diffuser chaque modification sur le bus du Core. Les pages ouvertes la reçoivent tout de suite, et une reconnexion reprend le journal court ;
 - conserver les positions du graphe par utilisateur et par vue.
 
 Le Core ne collecte rien lui-même sur Docker ou sur le réseau.

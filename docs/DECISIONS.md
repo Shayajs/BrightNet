@@ -66,8 +66,24 @@ Les compteurs du lien satellite décrivent l'antenne. Ils ne sont pas le trafic 
 
 Le canal des Node n'utilise plus HTTP. BNCP version 1 est une enveloppe de 12 octets (`BNCP`, version, type, drapeaux, longueur) suivie d'un corps CBOR qui reprend les noms du contrat JSON. Les types sont l'appairage, le battement, l'instantané, les événements, et leurs réponses. Une réponse ne contient que l'intervalle et les collecteurs autorisés.
 
-Le navigateur reste en JSON et SSE. L'ingestion JSON est conservée pour la transition. Le développement écoute `127.0.0.1:1717` pour l'interface et `127.0.0.1:1718` pour BNCP. TLS, par certificat et clé fournis au Core, est obligatoire avant d'exposer ces ports sur le réseau de la maison. Le Raspberry Pi n'est pas contacté tant que son audit en lecture seule n'est pas fait.
+Le navigateur reste en JSON et SSE. Il n'est pas un pair BNCP : le protocole reste un flux binaire, libre d'évoluer, et n'est pas réduit pour passer dans une page. L'ingestion JSON est conservée pour la transition. Le développement écoute `127.0.0.1:1717` et `127.0.0.1:1718`. TLS, par certificat et clé fournis au Core, est obligatoire avant une écoute sur toutes les interfaces.
+
+## ADR 013 — Le Node trouve le Core par annonce
+
+Un Node sans adresse configurée envoie une requête mDNS `_brightnet._tcp`. Un seul Core annoncé est pris. Plusieurs sont listés dans le terminal. S'il n'y a aucune annonce, un seul essai va vers `127.0.0.1:1718`. Le Core n'annonce pas une écoute de boucle locale. L'annonce ne fait pas partie des trames BNCP.
+
+## ADR 014 — Trois façons de reconnaître un appareil
+
+Un appareil sans Node apparaît seulement s'il a été vraiment vu : annonce mDNS, voisin IP déjà présent dans la table du Node, ou bail DHCP lu dans un fichier de baux. Aucune adresse n'est balayée. Le routeur du LAN reste la passerelle observée, pas un appareil de plus.
+
+## ADR 015 — dBNCP traverse le NAT par le Core
+
+dBNCP est le mode direct de BNCP. Deux Node déjà connectés au Core peuvent s'échanger un court message : le Core le relaie. Le NAT n'a pas à être ouvert. Ce n'est pas un second réseau IP et ce n'est pas un VPN pour tout le trafic de la machine. Le lien disparaît dès qu'un des deux Node n'est plus connecté.
 
 ## ADR 012 — Plusieurs Node, un hôte
 
 Un terminal peut lancer plusieurs BrightNet Node. Quand ils annoncent le même `machine-id`, ils écrivent le même hôte `host:machine:{id}` et ne retirent pas les entités d'un autre Node. Sans `machine-id`, chacun garde l'hôte `host:agent:{id}`. Une adresse IP ne fusionne toujours pas deux entités.
+
+## ADR 016 — Le bus du Core tient le rôle de Redis
+
+Les modifications ne restent pas dans le processus qui les a écrites. Le Core publie sur un bus en mémoire : activités, renommage, changement de graphe. Chaque page abonnée les reçoit. Si le flux se remplit, les activités anciennes cèdent la place, mais le dernier changement de graphe reste. Une reconnexion reprend les événements après le dernier identifiant reçu. Ce bus remplace un Redis séparé : même rôle, sans processus de plus sur le Pi.

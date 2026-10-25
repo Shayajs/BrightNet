@@ -5,12 +5,13 @@ import "time"
 const Version = "brightnet.ingest.v1"
 
 type Snapshot struct {
-	Version       string          `json:"version"`
-	CollectedAt   time.Time       `json:"collected_at"`
-	Simulated     bool            `json:"simulated"`
-	Host          HostSnapshot    `json:"host"`
-	Docker        *DockerSnapshot `json:"docker,omitempty"`
-	CollectorRuns []CollectorRun  `json:"collector_runs"`
+	Version       string           `json:"version"`
+	CollectedAt   time.Time        `json:"collected_at"`
+	Simulated     bool             `json:"simulated"`
+	Host          HostSnapshot     `json:"host"`
+	Devices       []DeviceSnapshot `json:"devices,omitempty"`
+	Docker        *DockerSnapshot  `json:"docker,omitempty"`
+	CollectorRuns []CollectorRun   `json:"collector_runs"`
 }
 
 type HostSnapshot struct {
@@ -23,6 +24,23 @@ type HostSnapshot struct {
 	Virtualization   string              `json:"virtualization"`
 	ObservationScope string              `json:"observation_scope"`
 	Interfaces       []InterfaceSnapshot `json:"interfaces"`
+	Gateways         []string            `json:"gateways,omitempty"`
+	DHCP             string              `json:"dhcp,omitempty"`
+	Networks         []NetworkPrefix     `json:"networks,omitempty"`
+}
+
+type NetworkPrefix struct {
+	Name string `json:"name"`
+	CIDR string `json:"cidr"`
+	DHCP string `json:"dhcp,omitempty"`
+}
+
+type DeviceSnapshot struct {
+	Name   string `json:"name"`
+	IP     string `json:"ip,omitempty"`
+	MAC    string `json:"mac,omitempty"`
+	Source string `json:"source"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type InterfaceSnapshot struct {
@@ -142,6 +160,7 @@ type AgentConfig struct {
 	Token                   string   `json:"token,omitempty"`
 	Collectors              []string `json:"collectors"`
 	SnapshotIntervalSeconds int      `json:"snapshot_interval_seconds"`
+	Peers                   []string `json:"peers,omitempty"`
 }
 
 func NodeAck(agentID, token string) AgentConfig {

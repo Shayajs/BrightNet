@@ -2,9 +2,12 @@ package host
 
 import (
 	"bufio"
+	"encoding/hex"
+	"io"
 	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"brightnet/internal/contract"
@@ -57,7 +60,57 @@ func Collect(opt Options) (contract.HostSnapshot, contract.CollectorRun) {
 		}
 		snap.Interfaces = append(snap.Interfaces, item)
 	}
+	snap.Gateways = defaultGateways("/proc/net/route")
 	return snap, contract.CollectorRun{Collector: "host", Status: "ok"}
+}
+
+func DefaultGateways() []string {
+	return defaultGateways("/proc/net/route")
+}
+
+func defaultGateways(path string) []string {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	return parseRouteGateways(file)
+}
+
+func parseRouteGateways(r io.Reader) []string {
+	scanner := bufio.NewScanner(r)
+	seen := map[string]bool{}
+	var out []string
+	header := true
+	for scanner.Scan() {
+		if header {
+			header = false
+			continue
+		}
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 4 || fields[1] != "00000000" {
+			continue
+		}
+		flags, err := strconv.ParseUint(fields[3], 16, 32)
+		if err != nil || flags&0x2 == 0 {
+			continue
+		}
+		ip := hexIPv4LE(fields[2])
+		if ip == "" || ip == "0.0.0.0" || seen[ip] {
+			continue
+		}
+		seen[ip] = true
+		out = append(out, ip)
+	}
+	return out
+}
+
+func hexIPv4LE(value string) string {
+	raw, err := hex.DecodeString(value)
+	if err != nil || len(raw) != 4 {
+		return ""
+	}
+	return net.IPv4(raw[3], raw[2], raw[1], raw[0]).String()
 }
 
 func osRelease() (string, string) {

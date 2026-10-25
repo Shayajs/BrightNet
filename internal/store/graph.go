@@ -11,11 +11,18 @@ import (
 
 var viewKinds = map[string]map[string]bool{
 	"docker":   {"host": true, "docker_engine": true, "docker_container": true, "docker_network": true, "docker_volume": true, "service": true},
-	"physical": {"host": true, "network_interface": true},
-	"logical":  {"host": true, "network_interface": true, "address": true},
+	"physical": {"host": true, "network_interface": true, "router": true},
+	"logical":  {"host": true, "network_interface": true, "address": true, "router": true},
+	"network":  {"network": true, "router": true, "host": true, "device": true},
+	"complex":  {"network": true, "router": true, "host": true, "device": true, "network_interface": true, "address": true, "docker_engine": true, "docker_container": true, "docker_network": true, "docker_volume": true, "service": true},
 }
 
-func (s *Store) Graph(ctx context.Context, view string) (contract.Graph, error) {
+type rawEntity struct {
+	node    contract.GraphNode
+	agentID string
+}
+
+func (s *Store) Graph(ctx context.Context, view, focus string) (contract.Graph, error) {
 	graph := contract.Graph{
 		View: view, GeneratedAt: time.Now().UTC(), DataOrigin: "live",
 		Nodes: []contract.GraphNode{}, Edges: []contract.GraphEdge{},
@@ -32,10 +39,6 @@ func (s *Store) Graph(ctx context.Context, view string) (contract.Graph, error) 
 		return graph, err
 	}
 	defer rows.Close()
-	type rawEntity struct {
-		node    contract.GraphNode
-		agentID string
-	}
 	var all []rawEntity
 	byID := map[string]rawEntity{}
 	for rows.Next() {
@@ -61,9 +64,13 @@ func (s *Store) Graph(ctx context.Context, view string) (contract.Graph, error) 
 	}
 	now := time.Now().UTC()
 	included := map[string]bool{}
+	extra := focusedDescendants(all, focus)
 	simulated, real := 0, 0
 	for _, item := range all {
-		if !kinds[item.node.Kind] {
+		if !kinds[item.node.Kind] && !extra[item.node.ID] {
+			continue
+		}
+		if view == "network" && item.node.Status == "absent" {
 			continue
 		}
 		if item.node.Kind == "host" {
@@ -73,7 +80,7 @@ func (s *Store) Graph(ctx context.Context, view string) (contract.Graph, error) 
 		}
 		if item.node.ParentID != "" {
 			parent, ok := byID[item.node.ParentID]
-			if !ok || !kinds[parent.node.Kind] {
+			if !ok || (!kinds[parent.node.Kind] && !extra[parent.node.ID]) {
 				item.node.ParentID = ""
 			}
 		}
@@ -113,6 +120,31 @@ func (s *Store) Graph(ctx context.Context, view string) (contract.Graph, error) 
 		graph.Notice = "Aucune entité dans cette vue. L'agent n'a peut-être pas encore envoyé d'inventaire."
 	}
 	return graph, erows.Err()
+}
+
+func focusedDescendants(all []rawEntity, focus string) map[string]bool {
+	extra := map[string]bool{}
+	if focus == "" {
+		return extra
+	}
+	children := map[string][]string{}
+	for _, item := range all {
+		if item.node.ParentID != "" {
+			children[item.node.ParentID] = append(children[item.node.ParentID], item.node.ID)
+		}
+	}
+	var walk func(string)
+	walk = func(id string) {
+		for _, child := range children[id] {
+			if extra[child] {
+				continue
+			}
+			extra[child] = true
+			walk(child)
+		}
+	}
+	walk(focus)
+	return extra
 }
 
 func (s *Store) Entity(ctx context.Context, entityID string) (contract.GraphNode, []contract.GraphEdge, error) {

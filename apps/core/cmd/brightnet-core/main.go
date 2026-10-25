@@ -14,8 +14,9 @@ import (
 	"time"
 
 	"brightnet/internal/bncp"
+	"brightnet/internal/bus"
+	"brightnet/internal/discover"
 	"brightnet/internal/httpserver"
-	"brightnet/internal/hub"
 	"brightnet/internal/store"
 )
 
@@ -52,8 +53,16 @@ func main() {
 		slog.Error("code de développement non préparé", "err", err)
 		os.Exit(1)
 	}
-	h := hub.New()
-	api := httpserver.New(st, h).Handler()
+	h := bus.New()
+	apiServer := httpserver.New(st, h)
+	apiServer.Downloads = os.Getenv("BRIGHTNET_DOWNLOADS")
+	api := apiServer.Handler()
+	stopAnnounce, err := discover.Announce(bncpListen)
+	if err != nil {
+		slog.Warn("annonce mDNS inactive", "err", err)
+	} else {
+		defer stopAnnounce()
+	}
 	apiSrv := &http.Server{Addr: listen, Handler: api, ReadHeaderTimeout: 5 * time.Second}
 	uiSrv := &http.Server{Addr: uiListen, Handler: httpserver.WithUI(api, webRoot), ReadHeaderTimeout: 5 * time.Second}
 	bncpLn, err := listenTLS(bncpListen, cert, key)

@@ -10,11 +10,20 @@ import (
 
 var ErrUnauthorized = errors.New("jeton d'agent invalide")
 
+type Direct struct {
+	From    string
+	Payload string
+}
+
 type Client struct {
-	Addr string
-	Dial func(context.Context, string, string) (net.Conn, error)
-	mu   sync.Mutex
-	conn net.Conn
+	Addr     string
+	Dial     func(context.Context, string, string) (net.Conn, error)
+	OnDirect func(Direct)
+
+	mu      sync.Mutex
+	conn    net.Conn
+	acks    chan Frame
+	waiters int
 }
 
 func (c *Client) RoundTrip(ctx context.Context, typ uint8, payload any, dest any) error {
@@ -27,16 +36,30 @@ func (c *Client) RoundTrip(ctx context.Context, typ uint8, payload any, dest any
 	if err := c.ensure(ctx); err != nil {
 		return err
 	}
-	_ = c.conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = c.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
 	if err := Write(c.conn, Frame{Type: typ, Body: body}); err != nil {
 		c.close()
 		return err
 	}
-	frame, err := Read(c.conn)
-	if err != nil {
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+	select {
+	case frame, ok := <-c.acks:
+		if !ok {
+			c.close()
+			return errors.New("connexion BNCP coupée")
+		}
+		return c.finish(frame, dest)
+	case <-timer.C:
 		c.close()
-		return err
+		return context.DeadlineExceeded
+	case <-ctx.Done():
+		c.close()
+		return ctx.Err()
 	}
+}
+
+func (c *Client) finish(frame Frame, dest any) error {
 	if frame.Type == TypeError {
 		var msg struct {
 			Error string `json:"error"`
@@ -79,7 +102,34 @@ func (c *Client) ensure(ctx context.Context) error {
 		return err
 	}
 	c.conn = conn
+	c.acks = make(chan Frame, 4)
+	go c.read(conn, c.acks)
 	return nil
+}
+
+func (c *Client) read(conn net.Conn, acks chan Frame) {
+	defer close(acks)
+	for {
+		frame, err := Read(conn)
+		if err != nil {
+			return
+		}
+		if frame.Type == TypeDirect {
+			var msg struct {
+				From    string `json:"from"`
+				Payload string `json:"payload"`
+			}
+			if Unmarshal(frame.Body, &msg) == nil && c.OnDirect != nil {
+				c.OnDirect(Direct{From: msg.From, Payload: msg.Payload})
+			}
+			continue
+		}
+		select {
+		case acks <- frame:
+		default:
+			return
+		}
+	}
 }
 
 func (c *Client) close() error {

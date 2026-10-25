@@ -5,7 +5,7 @@ BrightNet observe une infrastructure personnelle. Le MVP applique les limites su
 ## Périmètre
 
 - Aucune dépendance cloud et aucune télémétrie.
-- Aucune découverte active du réseau local. L'agent ne décrit que son hôte et le moteur Docker dont on lui donne le socket.
+- Aucune découverte active des appareils. Le Node ne balaie pas les adresses : sans `BRIGHTNET_BNCP_ADDR`, il écoute les annonces mDNS des Core (`_brightnet._tcp`) et, s'il n'y en a qu'un, s'y connecte. Plusieurs Core sont proposés au terminal. À défaut d'annonce, il essaie seulement `127.0.0.1:1718`. Un appareil sans Node n'est pas interrogé.
 - Aucune action de contrôle : pas de démarrage, d'arrêt, de suppression, de modification DNS ni d'exécution de commande.
 - Le connecteur Starlink, lorsqu'il existera, n'ouvrira que les adresses configurées et n'enverra que `get_diagnostics`, `get_status` et `get_history`. Pas de configuration, pas de redémarrage, pas de position GPS. Une lecture manuelle du 25 octobre 2026 a vérifié ces réponses ; elle n'est pas un balayage du LAN.
 - Le Core ne monte pas le socket Docker.
@@ -33,7 +33,7 @@ Le conteneur d'agent de développement est root afin de lire le socket Docker De
 
 ## Avant tout accès réseau
 
-TLS obligatoire, cookie `Secure`, codes d'appairage à usage unique conservés, et aucun port publié sur `0.0.0.0` sans décision explicite. BNCP et l'interface sur `1717` suivent la même règle : en développement ils n'écoutent que `127.0.0.1`, et le Core n'active TLS que si `BRIGHTNET_TLS_CERT` et `BRIGHTNET_TLS_KEY` sont définis. Le Raspberry Pi n'est pas contacté. Un appareil sans Node n'est pas interrogé et n'apparaît pas par un balayage.
+TLS obligatoire avant d'écouter sur toutes les interfaces, cookie `Secure`, et codes d'appairage à usage unique. En développement, `1717` et `1718` restent sur `127.0.0.1` et ne sont pas annoncés. Sur le Pi, ils sont liés à `192.168.1.3` pour que les Node de la maison puissent joindre le Core ; le chiffrement de ce lien reste à faire. Le code d'appairage réutilisable ne doit pas être défini tant que `1718` est joignable depuis le réseau. Un appareil sans Node n'est pas interrogé.
 
 ## Limites connues du MVP
 

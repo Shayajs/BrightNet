@@ -9,7 +9,7 @@ SQLite, migrations dans `internal/store/migrations`. Les horodatages sont des ch
 | Colonne | Rôle |
 | --- | --- |
 | `id` | ULID stable, distinct du nom affiché |
-| `kind` | `host`, `network_interface`, `address`, `docker_engine`, `docker_container`, `docker_network`, `docker_volume`, `service` |
+| `kind` | `host`, `network_interface`, `address`, `router`, `docker_engine`, `docker_container`, `docker_network`, `docker_volume`, `service` |
 | `display_name` | nom modifiable |
 | `name_locked` | si vrai, un instantané ne réécrit pas le nom |
 | `technical_key` | clé unique de réconciliation |
@@ -24,6 +24,7 @@ Clés :
 
 - hôte avec `machine-id` : `host:machine:{machineID}`, partagé par les Node de cette machine
 - hôte sans `machine-id` : `host:agent:{agentID}`
+- routeur : `router:{machineID}:{passerelle}`, ou `router:{agentID}:{passerelle}` sans machine-id. Seule la route par défaut lue dans la table de routage du Node est enregistrée. La relation est `ROUTES_VIA`, preuve `observed`
 - interface : `iface:{agentID}:{nom}`
 - adresse : `addr:{agentID}:{interface}:{ip}`
 - moteur : `docker-engine:{engineID}`

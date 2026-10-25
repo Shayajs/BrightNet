@@ -15,6 +15,7 @@ type wire interface {
 	Heartbeat(ctx context.Context, agentID, token string) (contract.AgentConfig, error)
 	Snapshot(ctx context.Context, agentID, token string, snap contract.Snapshot) (contract.AgentConfig, error)
 	Events(ctx context.Context, agentID, token string, events []contract.DockerEvent) error
+	Direct(ctx context.Context, agentID, token, to, payload string) error
 	Close() error
 }
 
@@ -57,6 +58,8 @@ func (w httpWire) Events(ctx context.Context, agentID, token string, events []co
 
 func (w httpWire) Close() error { return nil }
 
+func (w httpWire) Direct(context.Context, string, string, string, string) error { return nil }
+
 type bncpWire struct{ client *bncp.Client }
 
 func (w bncpWire) Enroll(ctx context.Context, req contract.EnrollRequest) (contract.AgentConfig, error) {
@@ -96,3 +99,9 @@ func (w bncpWire) Events(ctx context.Context, agentID, token string, events []co
 }
 
 func (w bncpWire) Close() error { return w.client.Close() }
+
+func (w bncpWire) Direct(ctx context.Context, agentID, token, to, payload string) error {
+	return w.client.RoundTrip(ctx, bncp.TypeDirect, map[string]string{
+		"agent_id": agentID, "token": token, "to": to, "payload": payload,
+	}, nil)
+}
